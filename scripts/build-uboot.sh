@@ -29,7 +29,11 @@ UBOOT_URL="https://ftp.denx.de/pub/u-boot/u-boot-${UBOOT_VERSION}.tar.bz2"
 UBOOT_SHA256=""  # Set to SHA256 of the tarball to enable verification
 
 CROSS_COMPILE="${CROSS_COMPILE:-aarch64-linux-gnu-}"
-ARCH=arm64
+# U-Boot uses ARCH=arm for ALL ARM targets (32-bit and 64-bit alike).
+# AArch64 mode is selected by the defconfig, not by this variable.
+# ARCH=arm64 is a Linux kernel convention that U-Boot does not recognise
+# (there is no arch/arm64/ in U-Boot — only arch/arm/).
+ARCH=arm
 JOBS="${JOBS:-$(nproc)}"
 
 BUILD_DIR="${REPO_ROOT}/build/uboot"
