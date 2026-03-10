@@ -129,23 +129,6 @@ if [[ ! -f "${PATCH_STAMP}" ]]; then
             echo "    WARNING: patch $(basename "${patch}") did not apply cleanly — continuing anyway"
         fi
     done
-
-    # Fix SWIG_Python_AppendOutput() call-site arity for SWIG >= 4.2.0.
-    #
-    # U-Boot 2024.01 ships a pre-generated scripts/dtc/pylibfdt/libfdt_wrap.c
-    # that was produced by an older SWIG.  SWIG 4.2.0 added a third argument
-    # (int is_void) to SWIG_Python_AppendOutput(); the host SWIG runtime header
-    # now declares the 3-argument form, so the old 2-argument calls in
-    # libfdt_wrap.c fail to compile.  Append the required ', 0' to each call.
-    LIBFDT_WRAP="${UBOOT_SRC}/scripts/dtc/pylibfdt/libfdt_wrap.c"
-    if [[ -f "${LIBFDT_WRAP}" ]]; then
-        echo "==> Patching libfdt_wrap.c for SWIG >= 4.2.0 compatibility..."
-        sed -i \
-            -e 's/SWIG_Python_AppendOutput(resultobj, val)/SWIG_Python_AppendOutput(resultobj, val, 0)/g' \
-            -e 's/SWIG_Python_AppendOutput(resultobj, buff)/SWIG_Python_AppendOutput(resultobj, buff, 0)/g' \
-            "${LIBFDT_WRAP}"
-    fi
-
     touch "${PATCH_STAMP}"
 fi
 
@@ -162,10 +145,13 @@ make -C "${UBOOT_SRC}" \
 # ── Build U-Boot ───────────────────────────────────────────────────────────
 
 echo "==> Building U-Boot (-j${JOBS})..."
+# SCP=/dev/null tells binman we have no SCP firmware; SCP (OpenRISC power
+# management co-processor) is only needed for system suspend and is optional.
 make -C "${UBOOT_SRC}" \
     ARCH="${ARCH}" \
     CROSS_COMPILE="${CROSS_COMPILE}" \
     BL31="${TFA_BL31}" \
+    SCP=/dev/null \
     O="${BUILD_DIR}" \
     -j"${JOBS}"
 
