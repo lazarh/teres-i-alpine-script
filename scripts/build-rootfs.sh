@@ -109,8 +109,8 @@ chroot "${SYSROOT}" dpkg-reconfigure -f noninteractive tzdata
 
 # /etc/fstab for SD card boot; overwritten by install-to-nand.sh for NAND boot
 cat > "${SYSROOT}/etc/fstab" <<EOF
-/dev/mmcblk0p2  /      ext4  defaults,noatime  0  1
-/dev/mmcblk0p1  /boot  vfat  defaults          0  2
+/dev/mmcblk1p2  /      ext4  defaults,noatime  0  1
+/dev/mmcblk1p1  /boot  vfat  defaults          0  2
 tmpfs           /tmp   tmpfs defaults,nosuid,nodev  0  0
 EOF
 
