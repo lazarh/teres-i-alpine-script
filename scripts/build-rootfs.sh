@@ -132,7 +132,6 @@ chroot "${SYSROOT}" apt-get install -y --no-install-recommends \
     util-linux e2fsprogs dosfstools parted \
     rsync wget curl \
     mtd-utils \
-    ubi-reader \
     u-boot-tools \
     kmod iptables conntrack nftables
 
