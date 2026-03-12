@@ -65,16 +65,16 @@ bmaptool copy teres-i-debian13.img.gz /dev/sdX
 zcat teres-i-debian13.img.gz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-### 7. First boot — install to internal NAND
+### 7. First boot — install to internal eMMC
 
 Insert the SD card into the Teres-I and power on. After it boots, log in as root
 and run:
 ```bash
 install-to-nand.sh
 ```
-This writes U-Boot to the NAND "boot" partition and copies the complete system into
-UBI volumes on the NAND "ubi" partition. Remove the SD card and reboot; the board
-will boot directly from NAND.
+This partitions the internal eMMC (`/dev/mmcblk2`), writes U-Boot at the 8 KiB
+offset, copies boot files to a FAT32 partition, and copies the rootfs to an ext4
+partition. Remove the SD card and reboot; the board will boot from eMMC.
 
 ## Default credentials
 
@@ -94,17 +94,16 @@ will boot directly from NAND.
 | Partition 1 (FAT32, 80 MiB) | `/boot` — Image, DTB, boot.scr, u-boot-sunxi-with-spl.bin |
 | Partition 2 (ext4, rest) | `/` — Debian rootfs |
 
-## NAND layout (after `install-to-nand.sh`)
+## eMMC layout (after `install-to-nand.sh`)
 
-| MTD device | Label | Content |
-|---|---|---|
-| `/dev/mtd0` | `boot` | U-Boot SPL + TF-A BL31 + U-Boot proper (raw write) |
-| `/dev/mtd1` | `ubi` | UBI container |
-| `ubi0:boot` | — | UBIFS `/boot` — Image, DTB, NAND boot.scr |
-| `ubi0:rootfs` | — | UBIFS `/` — Debian rootfs |
+| Region | Content |
+|---|---|
+| Raw offset 8 KiB | U-Boot SPL + TF-A BL31 + U-Boot proper |
+| Partition 1 (FAT32, 80 MiB) | `/boot` — Image, DTB, boot.scr |
+| Partition 2 (ext4, rest) | `/` — Debian rootfs |
 
-The NAND `boot.scr` uses `ubi part ubi` / `ubifsmount` / `ubifsload` to load the
-kernel, then boots with `root=ubi0:rootfs rootfstype=ubifs`.
+The eMMC `boot.scr` loads the kernel from `mmc 2:1` and boots with
+`root=/dev/mmcblk2p2 rootfstype=ext4`.
 
 ## Build configuration
 

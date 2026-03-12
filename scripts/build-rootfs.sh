@@ -107,7 +107,7 @@ chroot "${SYSROOT}" locale-gen
 echo "UTC" > "${SYSROOT}/etc/timezone"
 chroot "${SYSROOT}" dpkg-reconfigure -f noninteractive tzdata
 
-# /etc/fstab for SD card boot; overwritten by install-to-nand.sh for NAND boot
+# /etc/fstab for SD card boot; overwritten by install-to-nand.sh for eMMC boot
 cat > "${SYSROOT}/etc/fstab" <<EOF
 /dev/mmcblk0p2  /      ext4  defaults,noatime  0  1
 /dev/mmcblk0p1  /boot  vfat  defaults          0  2

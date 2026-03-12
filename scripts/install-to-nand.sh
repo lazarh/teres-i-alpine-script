@@ -1,162 +1,124 @@
 #!/bin/bash
-# install-to-nand.sh — Write the running SD card OS to the internal NAND flash.
+# install-to-nand.sh — Write the running SD card OS to the internal eMMC.
 #
 # Run this from the booted SD card image as root on the Teres-I.
 #
-# The Teres-I uses raw NAND accessed via the Linux MTD subsystem.
-# The mainline kernel's sunxi-nand driver exposes MTD devices:
-#   /dev/mtd0 (label "boot") — U-Boot SPL + proper (raw write, 4 MiB)
-#   /dev/mtd1 (label "ubi")  — UBI container (boot volume + rootfs volume)
+# The Teres-I's internal storage is eMMC at /dev/mmcblk2 (mmc2).
+# This script partitions the eMMC identically to the SD card:
+#   8 KiB offset : U-Boot SPL + proper (raw, dd)
+#   Partition 1  : /boot (FAT32, 80 MiB)
+#   Partition 2  : /     (ext4, remaining space)
 #
-# NAND layout written:
-#   /dev/mtd0  : U-Boot (SPL + proper), written raw with nandwrite
-#   /dev/mtd1  : UBI
-#     ubi0:boot   (256 MiB, UBIFS) — /boot: Image, DTB, boot.scr
-#     ubi0:rootfs (remaining,UBIFS) — /: Debian rootfs
-#
-# After install: remove the SD card and reboot.  U-Boot will boot from NAND.
+# After install: remove the SD card and reboot to start from eMMC.
 
 set -euo pipefail
 
 UBOOT_BIN=/boot/u-boot-sunxi-with-spl.bin
-BOOT_VOLUME_SIZE="256MiB"
+EMMC_DEV=/dev/mmcblk2
+BOOT_SIZE_MIB=80
 WORK_DIR=$(mktemp -d)
-UBI_MTD=""  # set after MTD detection; used by cleanup
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 cleanup() {
-    umount "${WORK_DIR}/boot"  2>/dev/null || true
-    umount "${WORK_DIR}/root"  2>/dev/null || true
-    if [[ -n "${UBI_MTD}" ]]; then
-        ubidetach -p "${UBI_MTD}" 2>/dev/null || true
-    fi
+    umount "${WORK_DIR}/boot" 2>/dev/null || true
+    umount "${WORK_DIR}/root" 2>/dev/null || true
     rm -rf "${WORK_DIR}"
 }
 trap cleanup EXIT
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-# Find an MTD device by its label (reads /sys/class/mtd/mtdN/name).
-find_mtd() {
-    local label="$1"
-    for sysfs_entry in /sys/class/mtd/mtd[0-9]*; do
-        [[ -f "${sysfs_entry}/name" ]] || continue
-        if [[ "$(cat "${sysfs_entry}/name")" == "${label}" ]]; then
-            echo "/dev/$(basename "${sysfs_entry}")"
-            return 0
-        fi
-    done
-    return 1
-}
-
 # ── Preflight checks ────────────────────────────────────────────────────────
 
 [[ $EUID -eq 0 ]] || die "Must be run as root"
 
-command -v flash_erase  >/dev/null || die "flash_erase not found — install mtd-utils"
-command -v nandwrite    >/dev/null || die "nandwrite not found — install mtd-utils"
-command -v ubiformat    >/dev/null || die "ubiformat not found — install mtd-utils"
-command -v ubiattach    >/dev/null || die "ubiattach not found — install mtd-utils"
-command -v ubimkvol     >/dev/null || die "ubimkvol not found — install mtd-utils"
-command -v mkimage      >/dev/null || die "mkimage not found — install u-boot-tools"
-
-[[ -f "${UBOOT_BIN}" ]] || die "${UBOOT_BIN} not found — was the SD image built correctly?"
-
-echo "==> Detecting NAND MTD devices..."
-MTD_LIST=""
-for m in /sys/class/mtd/mtd[0-9]*; do
-    n="$(cat "${m}/name" 2>/dev/null || echo '?')"
-    MTD_LIST+="  /dev/$(basename "${m}"): ${n}\n"
+for cmd in parted mkfs.vfat mkfs.ext4 rsync; do
+    command -v "${cmd}" >/dev/null || die "${cmd} not found"
 done
 
-BOOT_MTD=$(find_mtd "boot") || die \
-    "MTD partition 'boot' not found.
-    Make sure:
-      1. The sunxi-nand driver is loaded (check: lsmod | grep nand)
-      2. The kernel DTS defines NAND partitions with labels 'boot' and 'ubi'
-      3. You are running this on the Teres-I hardware
-    Available MTD devices:
-$(printf '%b' "${MTD_LIST}")"
+[[ -f "${UBOOT_BIN}" ]] || die "${UBOOT_BIN} not found — was the SD image built correctly?"
+[[ -b "${EMMC_DEV}" ]]  || die "${EMMC_DEV} not found — are you running on Teres-I hardware?"
 
-UBI_MTD=$(find_mtd "ubi") || die \
-    "MTD partition 'ubi' not found.
-    Available MTD devices:
-$(printf '%b' "${MTD_LIST}")"
+# Safety: refuse if eMMC is the current root device
+ROOT_DEV=$(findmnt -n -o SOURCE /)
+case "${ROOT_DEV}" in
+    ${EMMC_DEV}*) die "Root filesystem is on ${EMMC_DEV} — refusing to overwrite the running system" ;;
+esac
 
-echo "    U-Boot MTD : ${BOOT_MTD}"
-echo "    UBI MTD    : ${UBI_MTD}"
+EMMC_SIZE=$(blockdev --getsize64 "${EMMC_DEV}")
+EMMC_SIZE_GB=$(awk "BEGIN {printf \"%.1f\", ${EMMC_SIZE}/1073741824}")
+echo "==> Detected eMMC: ${EMMC_DEV} (${EMMC_SIZE_GB} GB)"
 
-# Warn if UBI is already formatted (existing installation)
-if ubiattach -p "${UBI_MTD}" -d 9 2>/dev/null; then
-    ubidetach -d 9 2>/dev/null || true
-    read -rp "NAND already has a UBI volume. Overwrite? [y/N] " answer
+# Warn if eMMC already has partitions
+if lsblk -n -o NAME "${EMMC_DEV}" 2>/dev/null | grep -q "mmcblk2p"; then
+    read -rp "eMMC already has partitions. Overwrite? [y/N] " answer
     [[ "${answer,,}" == "y" ]] || { echo "Aborted."; exit 0; }
 fi
 
 echo ""
-echo "==> Installing to NAND.  All NAND data will be lost."
+echo "==> Installing to eMMC (${EMMC_DEV}).  All eMMC data will be lost."
 echo "    Press Ctrl-C within 5 seconds to abort."
 sleep 5
 
-# ── Write U-Boot to NAND ───────────────────────────────────────────────────
+# ── Unmount any existing eMMC partitions ───────────────────────────────────
 
-echo "==> Erasing U-Boot MTD partition (${BOOT_MTD})..."
-flash_erase "${BOOT_MTD}" 0 0
+for part in "${EMMC_DEV}"p*; do
+    umount "${part}" 2>/dev/null || true
+done
 
-echo "==> Writing U-Boot to ${BOOT_MTD}..."
-nandwrite -p "${BOOT_MTD}" "${UBOOT_BIN}"
+# ── Partition eMMC ─────────────────────────────────────────────────────────
+
+echo "==> Partitioning eMMC..."
+parted -s "${EMMC_DEV}" mklabel msdos
+parted -s "${EMMC_DEV}" mkpart primary fat32 40MiB $((40 + BOOT_SIZE_MIB))MiB
+parted -s "${EMMC_DEV}" mkpart primary ext4  $((40 + BOOT_SIZE_MIB))MiB 100%
+partprobe "${EMMC_DEV}"
+sleep 1
+
+BOOT_PART="${EMMC_DEV}p1"
+ROOT_PART="${EMMC_DEV}p2"
+
+# ── Flash U-Boot ────────────────────────────────────────────────────────────
+
+echo "==> Writing U-Boot at 8 KiB offset..."
+dd if="${UBOOT_BIN}" of="${EMMC_DEV}" bs=1k seek=8 conv=notrunc 2>/dev/null
 echo "    U-Boot written."
 
-# ── Format UBI partition ───────────────────────────────────────────────────
+# ── Format partitions ──────────────────────────────────────────────────────
 
-echo "==> Formatting UBI partition (${UBI_MTD})..."
-ubiformat "${UBI_MTD}" -y
+echo "==> Formatting partitions..."
+mkfs.vfat -n BOOT "${BOOT_PART}"
+mkfs.ext4 -L rootfs -F "${ROOT_PART}"
 
-echo "==> Attaching UBI (${UBI_MTD} → /dev/ubi0)..."
-ubiattach -p "${UBI_MTD}" -d 0
-
-# ── Create UBI volumes ─────────────────────────────────────────────────────
-
-echo "==> Creating UBI volume 'boot' (${BOOT_VOLUME_SIZE})..."
-ubimkvol /dev/ubi0 -N boot -s "${BOOT_VOLUME_SIZE}"
-
-echo "==> Creating UBI volume 'rootfs' (remaining space)..."
-ubimkvol /dev/ubi0 -N rootfs -m
-
-# ── Mount UBI volumes ──────────────────────────────────────────────────────
+# ── Mount partitions ──────────────────────────────────────────────────────
 
 mkdir -p "${WORK_DIR}/boot" "${WORK_DIR}/root"
-mount -t ubifs ubi0:boot   "${WORK_DIR}/boot"
-mount -t ubifs ubi0:rootfs "${WORK_DIR}/root"
+mount "${BOOT_PART}" "${WORK_DIR}/boot"
+mount "${ROOT_PART}" "${WORK_DIR}/root"
 
 # ── Copy boot files ────────────────────────────────────────────────────────
 
-echo "==> Copying boot files to UBI 'boot' volume..."
+echo "==> Copying boot files..."
 cp -a /boot/. "${WORK_DIR}/boot/"
-# U-Boot binary is already written raw to mtd0 — no need to keep it in UBIFS
+# U-Boot binary is flashed raw — no need in the FAT partition
 rm -f "${WORK_DIR}/boot/u-boot-sunxi-with-spl.bin"
 
-# Generate a NAND-specific boot.scr that loads kernel/DTB from UBI 'boot'
-# and mounts rootfs from UBI 'rootfs' as UBIFS.
-echo "==> Generating NAND boot script..."
-NAND_BOOT_CMD=$(mktemp /tmp/nand-boot.XXXXXX.cmd)
-cat > "${NAND_BOOT_CMD}" <<'BOOTCMD'
-# Boot from NAND UBI on Teres-I.
-# Mounts the UBI 'boot' volume (UBIFS) to load kernel and DTB,
-# then mounts 'rootfs' volume as the root filesystem.
-ubi part ubi
-ubifsmount ubi0:boot
-ubifsload ${kernel_addr_r} Image
-ubifsload ${fdt_addr_r} sun50i-a64-teres-i.dtb
-setenv bootargs console=ttyS0,115200 console=tty1 ubi.mtd=ubi root=ubi0:rootfs rootfstype=ubifs rootwait panic=10 ${extra}
+# Generate an eMMC-specific boot.scr (root on mmcblk2p2)
+echo "==> Generating eMMC boot script..."
+EMMC_BOOT_CMD=$(mktemp /tmp/emmc-boot.XXXXXX.cmd)
+cat > "${EMMC_BOOT_CMD}" <<'BOOTCMD'
+# Boot from eMMC on Teres-I
+load mmc 2:1 ${kernel_addr_r} Image
+load mmc 2:1 ${fdt_addr_r} sun50i-a64-teres-i.dtb
+setenv bootargs console=ttyS0,115200 console=tty1 root=/dev/mmcblk2p2 rootfstype=ext4 rootwait panic=10 ${extra}
 booti ${kernel_addr_r} - ${fdt_addr_r}
 BOOTCMD
 mkimage -C none -A arm64 -T script \
-    -d "${NAND_BOOT_CMD}" \
+    -d "${EMMC_BOOT_CMD}" \
     "${WORK_DIR}/boot/boot.scr"
-rm -f "${NAND_BOOT_CMD}"
-echo "    NAND boot.scr written."
+rm -f "${EMMC_BOOT_CMD}"
+echo "    eMMC boot.scr written."
 
 # ── Copy rootfs ────────────────────────────────────────────────────────────
 
@@ -169,26 +131,34 @@ rsync -aAX --exclude=/proc --exclude=/sys --exclude=/dev \
 mkdir -p "${WORK_DIR}/root"/{proc,sys,dev,run,tmp,boot}
 chmod 1777 "${WORK_DIR}/root/tmp"
 
-# ── Update /etc/fstab for NAND boot ───────────────────────────────────────
+# Copy kernel modules
+if [[ -d /lib/modules ]]; then
+    rsync -aAX /lib/modules/ "${WORK_DIR}/root/lib/modules/"
+fi
 
-echo "==> Updating /etc/fstab for NAND boot..."
-cat > "${WORK_DIR}/root/etc/fstab" <<'EOF'
-ubi0:rootfs  /      ubifs  defaults,noatime  0  0
-tmpfs        /tmp   tmpfs  defaults,nosuid,nodev  0  0
+# ── Update /etc/fstab for eMMC boot ───────────────────────────────────────
+
+echo "==> Updating /etc/fstab for eMMC boot..."
+BOOT_UUID=$(blkid -s UUID -o value "${BOOT_PART}")
+ROOT_UUID=$(blkid -s UUID -o value "${ROOT_PART}")
+cat > "${WORK_DIR}/root/etc/fstab" <<EOF
+UUID=${ROOT_UUID}  /      ext4  defaults,noatime  0  1
+UUID=${BOOT_UUID}  /boot  vfat  defaults          0  2
+tmpfs              /tmp   tmpfs defaults,nosuid,nodev  0  0
 EOF
 
 sync
+umount "${WORK_DIR}/boot"
+umount "${WORK_DIR}/root"
+
 echo ""
-echo "==> Done! Remove the SD card and reboot to start from NAND."
+echo "==> Done! Remove the SD card and reboot to start from eMMC."
 echo ""
-echo "    NAND layout:"
-echo "      ${BOOT_MTD}  : U-Boot SPL + proper (raw)"
-echo "      ${UBI_MTD}   : UBI container"
-echo "        ubi0:boot   — /boot (UBIFS, ${BOOT_VOLUME_SIZE})"
-echo "        ubi0:rootfs — /     (UBIFS, remaining)"
+echo "    eMMC layout (${EMMC_DEV}):"
+echo "      8KiB offset  : U-Boot SPL + proper (raw)"
+echo "      ${BOOT_PART} : /boot (FAT32, ${BOOT_SIZE_MIB} MiB)"
+echo "      ${ROOT_PART} : /     (ext4, remaining)"
 echo ""
-echo "    On next boot U-Boot will detect the absent SD card and use NAND."
+echo "    U-Boot will auto-detect the absent SD card and boot from eMMC."
 echo "    If it does not, enter U-Boot shell and run:"
-echo "      => run nandboot"
-echo "    Or set the boot command permanently:"
-echo "      => setenv bootcmd 'run nandboot'; saveenv"
+echo "      => setenv boot_targets 'mmc2 mmc0'; saveenv; reset"
