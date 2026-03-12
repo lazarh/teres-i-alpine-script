@@ -1,0 +1,154 @@
+From: Copilot <223556219+Copilot@users.noreply.github.com>
+Subject: [PATCH 2/2] anx6345: enable AXP803 PMIC power via RSB for sunxi A64
+
+On Allwinner A64 boards such as the Olimex Teres-I, the ANX6345 eDP
+bridge's power supplies (DLDO2 = 2.5 V, DLDO3 = 1.2 V) are off by
+default in the AXP803 PMIC.  U-Boot for A64 uses CONFIG_SUNXI_NO_PMIC=y
+so the PMIC is never initialised, leaving the bridge unpowered on cold
+boot.
+
+Instead of pulling in the full AXP818_POWER framework (which introduces
+many dangerous voltage defaults), access the PMIC directly via the
+Reduced Serial Bus (RSB) from the ANX6345 video bridge driver:
+
+  1. Enable CONFIG_SYS_I2C_SUN8I_RSB in defconfig.
+  2. Widen the compile guard in sun8i_rsb.c so the low-level RSB API
+     (rsb_init / rsb_read / rsb_write / rsb_set_device_address) is
+     available when CONFIG_SYS_I2C_SUN8I_RSB is set.
+  3. Add anx6345_sunxi_pmic_init() to anx6345.c: sets DLDO2/3 voltages
+     and enables them via RSB, then waits 20 ms for rail stabilisation.
+
+Signed-off-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ configs/teres_i_defconfig           |  1 +
+ drivers/i2c/sun8i_rsb.c            |  2 +-
+ drivers/video/bridge/anx6345.c     | 79 +++++++++++++++++++++++++++++
+ 3 files changed, 81 insertions(+), 1 deletion(-)
+
+diff --git a/configs/teres_i_defconfig b/configs/teres_i_defconfig
+index 1234567..abcdef1 100644
+--- a/configs/teres_i_defconfig
++++ b/configs/teres_i_defconfig
+@@ -19,3 +19,4 @@
+ CONFIG_VIDEO_BRIDGE_ANALOGIX_ANX6345=y
+ CONFIG_USB_EHCI_HCD=y
+ CONFIG_USB_OHCI_HCD=y
++CONFIG_SYS_I2C_SUN8I_RSB=y
+diff --git a/drivers/i2c/sun8i_rsb.c b/drivers/i2c/sun8i_rsb.c
+index 1234567..abcdef1 100644
+--- a/drivers/i2c/sun8i_rsb.c
++++ b/drivers/i2c/sun8i_rsb.c
+@@ -134,7 +134,7 @@
+ return rsb_write(runtime_addr, reg_addr, data);
+ }
+ 
+-#if IS_ENABLED(CONFIG_AXP_PMIC_BUS)
++#if IS_ENABLED(CONFIG_AXP_PMIC_BUS) || IS_ENABLED(CONFIG_SYS_I2C_SUN8I_RSB)
+ int rsb_read(const u16 runtime_addr, const u8 reg_addr, u8 *data)
+ {
+ return sun8i_rsb_read(runtime_addr, reg_addr, data);
+diff --git a/drivers/video/bridge/anx6345.c b/drivers/video/bridge/anx6345.c
+index 1234567..abcdef1 100644
+--- a/drivers/video/bridge/anx6345.c
++++ b/drivers/video/bridge/anx6345.c
+@@ -13,6 +13,74 @@
+ #include <video_bridge.h>
+ #include "anx6345.h"
+ 
++#if IS_ENABLED(CONFIG_SYS_I2C_SUN8I_RSB)
++#include <asm/arch/rsb.h>
++
++/* AXP803 RSB addresses */
++#define AXP_PMIC_DEVICE_ADDR0x3a3
++#define AXP_PMIC_RUNTIME_ADDR0x2d
++
++/* AXP803 register offsets */
++#define AXP803_OUTPUT_CTRL20x12
++#define AXP803_DLDO2_CTRL0x16
++#define AXP803_DLDO3_CTRL0x17
++
++/* DLDOx voltage = 700 + val * 100 mV */
++#define AXP803_DLDO_2500MV0x12   /* (2500 - 700) / 100 */
++#define AXP803_DLDO_1200MV0x05   /* (1200 - 700) / 100 */
++
++/*
++ * Enable DLDO2 (2.5 V) and DLDO3 (1.2 V) on the AXP803 PMIC.
++ *
++ * These supply the ANX6345 eDP bridge (dvdd25 and dvdd12).  On the Teres-I
++ * the AXP803 is connected on the Reduced Serial Bus.  Safe to call multiple
++ * times; RSB init is idempotent.
++ */
++static int anx6345_sunxi_pmic_init(void)
++{
++u8 val;
++int ret;
++
++ret = rsb_init();
++if (ret) {
++debug("%s: rsb_init failed: %d\n", __func__, ret);
++return ret;
++}
++
++ret = rsb_set_device_address(AXP_PMIC_DEVICE_ADDR, AXP_PMIC_RUNTIME_ADDR);
++if (ret) {
++debug("%s: rsb_set_device_address failed: %d\n", __func__, ret);
++return ret;
++}
++
++/* Set DLDO2 voltage to 2.5V (dvdd25-supply for ANX6345) */
++ret = rsb_write(AXP_PMIC_RUNTIME_ADDR, AXP803_DLDO2_CTRL,
++AXP803_DLDO_2500MV);
++if (ret) {
++debug("%s: DLDO2 voltage write failed: %d\n", __func__, ret);
++return ret;
++}
++
++/* Set DLDO3 voltage to 1.2V (dvdd12-supply for ANX6345) */
++ret = rsb_write(AXP_PMIC_RUNTIME_ADDR, AXP803_DLDO3_CTRL,
++AXP803_DLDO_1200MV);
++if (ret) {
++debug("%s: DLDO3 voltage write failed: %d\n", __func__, ret);
++return ret;
++}
++
++/* Enable DLDO2 (BIT 4) and DLDO3 (BIT 5) in OUTPUT_CTRL2 */
++ret = rsb_read(AXP_PMIC_RUNTIME_ADDR, AXP803_OUTPUT_CTRL2, &val);
++if (ret) {
++debug("%s: OUTPUT_CTRL2 read failed: %d\n", __func__, ret);
++return ret;
++}
++val |= BIT(4) | BIT(5);
++ret = rsb_write(AXP_PMIC_RUNTIME_ADDR, AXP803_OUTPUT_CTRL2, val);
++if (ret) {
++debug("%s: OUTPUT_CTRL2 write failed: %d\n", __func__, ret);
++return ret;
++}
++
++/* Allow supplies to stabilise before I2C access to ANX6345 */
++mdelay(20);
++
++return 0;
++}
++#endif /* CONFIG_SYS_I2C_SUN8I_RSB */
++
+ #define DP_MAX_LINK_RATE0x001
+ #define DP_MAX_LANE_COUNT0x002
+ 
+@@ -340,6 +408,17 @@
+ u8 chipid, colordepth, lanes, data_rate, c;
+ int ret, i, bpp;
+ 
++#if IS_ENABLED(CONFIG_SYS_I2C_SUN8I_RSB)
++/*
++ * Enable ANX6345 power supplies (dvdd25 / dvdd12) via the AXP803 PMIC
++ * on sunxi A64 boards.  These are off by default and must be turned on
++ * before any I2C communication with the bridge.
++ */
++ret = anx6345_sunxi_pmic_init();
++if (ret)
++debug("%s: PMIC init failed (%d), proceeding anyway\n",
++      __func__, ret);
++#endif
++
+ /* Deassert reset and enable power */
+ ret = video_bridge_set_active(dev, true);

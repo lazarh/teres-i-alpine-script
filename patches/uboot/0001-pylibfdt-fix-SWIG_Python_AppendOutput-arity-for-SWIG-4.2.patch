@@ -1,0 +1,49 @@
+From: Fix SWIG_Python_AppendOutput call-site arity for SWIG >= 4.2.0
+Subject: [PATCH] pylibfdt: fix SWIG_Python_AppendOutput arity for SWIG >= 4.2.0
+
+SWIG 4.2.0 added a third 'int is_void' argument to
+SWIG_Python_AppendOutput().  The three call sites in the libfdt
+SWIG interface file still use the old two-argument form, which
+causes a compile error when the host has SWIG >= 4.2.0 installed:
+
+  libfdt_wrap.c: error: too few arguments to function
+    'SWIG_Python_AppendOutput'
+
+Add the required ', 0' (is_void=false) third argument to all three
+call sites.  This is safe for all SWIG versions: the generated
+libfdt_wrap.c is always compiled against the same SWIG runtime
+headers that generated it, so the declaration and call sites match.
+
+Signed-off-by: Olimex Teres-I build scripts
+---
+ scripts/dtc/pylibfdt/libfdt.i_shipped | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+--- a/scripts/dtc/pylibfdt/libfdt.i_shipped
++++ b/scripts/dtc/pylibfdt/libfdt.i_shipped
+@@ -1037,7 +1037,7 @@
+ 			fdt_string(fdt1, fdt32_to_cpu($1->nameoff)));
+ 		buff = PyByteArray_FromStringAndSize(
+ 			(const char *)($1 + 1), fdt32_to_cpu($1->len));
+-		resultobj = SWIG_Python_AppendOutput(resultobj, buff);
++		resultobj = SWIG_Python_AppendOutput(resultobj, buff, 0);
+ 	}
+ }
+ 
+@@ -1076,7 +1076,7 @@
+ 
+ %typemap(argout) int *depth {
+         PyObject *val = Py_BuildValue("i", *arg$argnum);
+-        resultobj = SWIG_Python_AppendOutput(resultobj, val);
++        resultobj = SWIG_Python_AppendOutput(resultobj, val, 0);
+ }
+ 
+ %apply int *depth { int *depth };
+@@ -1092,7 +1092,7 @@
+            if (PyTuple_GET_SIZE(resultobj) == 0)
+               resultobj = val;
+            else
+-              resultobj = SWIG_Python_AppendOutput(resultobj, val);
++              resultobj = SWIG_Python_AppendOutput(resultobj, val, 0);
+         }
+ }
