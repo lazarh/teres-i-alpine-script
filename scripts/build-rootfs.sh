@@ -129,7 +129,7 @@ chroot "${SYSROOT}" apt-get install -y --no-install-recommends \
     firmware-realtek \
     usbutils pciutils \
     vim-tiny less \
-    util-linux e2fsprogs dosfstools parted \
+    util-linux e2fsprogs dosfstools parted cloud-guest-utils \
     rsync wget curl \
     mtd-utils \
     u-boot-tools \
@@ -172,6 +172,48 @@ chroot "${SYSROOT}" systemctl enable ssh.service || true
 
 echo "==> Enabling systemd-timesyncd (NTP)..."
 chroot "${SYSROOT}" systemctl enable systemd-timesyncd.service || true
+
+# ── First-boot partition resize ─────────────────────────────────────────────
+
+echo "==> Installing first-boot partition resize service..."
+
+cat > "${SYSROOT}/usr/local/sbin/resize-rootfs.sh" <<'RESIZE_SCRIPT'
+#!/bin/bash
+# Expand the root partition and filesystem to fill the entire storage device.
+# Runs once on first boot, then disables itself.
+set -e
+
+ROOT_PART=$(findmnt -n -o SOURCE /)
+ROOT_DEV=$(lsblk -n -o PKNAME "${ROOT_PART}" | head -1)
+PART_NUM=$(cat /sys/class/block/$(basename "${ROOT_PART}")/partition)
+
+echo "resize-rootfs: expanding /dev/${ROOT_DEV} partition ${PART_NUM}..."
+growpart "/dev/${ROOT_DEV}" "${PART_NUM}" || true
+resize2fs "${ROOT_PART}" || true
+
+echo "resize-rootfs: done, disabling service"
+systemctl disable resize-rootfs.service
+rm -f /etc/systemd/system/resize-rootfs.service
+RESIZE_SCRIPT
+chmod 0755 "${SYSROOT}/usr/local/sbin/resize-rootfs.sh"
+
+cat > "${SYSROOT}/etc/systemd/system/resize-rootfs.service" <<'UNIT'
+[Unit]
+Description=Expand root partition to fill storage
+DefaultDependencies=no
+Before=local-fs-pre.target
+After=systemd-remount-fs.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/resize-rootfs.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+chroot "${SYSROOT}" systemctl enable resize-rootfs.service || true
 
 # ── Embed install-to-nand.sh ────────────────────────────────────────────────
 
