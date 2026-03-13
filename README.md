@@ -102,7 +102,9 @@ partition. Remove the SD card and reboot; the board will boot from eMMC.
 | Partition 1 (FAT32, 80 MiB) | `/boot` — Image, DTB, boot.scr |
 | Partition 2 (ext4, rest) | `/` — Debian rootfs |
 
-The eMMC `boot.scr` loads the kernel from `mmc 2:1` and boots with
+Linux exposes the internal storage as `/dev/mmcblk2`, but U-Boot enumerates the
+same controller as `mmc 1` on this board. The eMMC `boot.scr` therefore loads
+the kernel from `mmc 1:1` and boots with
 `root=/dev/mmcblk2p2 rootfstype=ext4`.
 
 ## Build configuration

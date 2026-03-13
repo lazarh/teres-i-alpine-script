@@ -24,11 +24,14 @@ TFA_URL="https://github.com/ARM-software/arm-trusted-firmware/archive/refs/tags/
 TFA_SHA256=""  # Set to SHA256 of the tarball to enable verification
 
 # U-Boot
-UBOOT_VERSION="2024.01"
+# This branch defaults to the older v2019.10 release for ANX6345 bring-up
+# comparison, but you can still override it for one-off experiments.
+UBOOT_VERSION="${UBOOT_VERSION:-2019.10}"
 UBOOT_URL="https://ftp.denx.de/pub/u-boot/u-boot-${UBOOT_VERSION}.tar.bz2"
 UBOOT_SHA256=""  # Set to SHA256 of the tarball to enable verification
 
 CROSS_COMPILE="${CROSS_COMPILE:-aarch64-linux-gnu-}"
+PYTHON2="${PYTHON2:-python3}"
 # U-Boot uses ARCH=arm for ALL ARM targets (32-bit and 64-bit alike).
 # AArch64 mode is selected by the defconfig, not by this variable.
 # ARCH=arm64 is a Linux kernel convention that U-Boot does not recognise
@@ -138,6 +141,7 @@ echo "==> Configuring U-Boot (teres_i_defconfig)..."
 make -C "${UBOOT_SRC}" \
     ARCH="${ARCH}" \
     CROSS_COMPILE="${CROSS_COMPILE}" \
+    PYTHON2="${PYTHON2}" \
     BL31="${TFA_BL31}" \
     O="${BUILD_DIR}" \
     teres_i_defconfig
@@ -150,6 +154,7 @@ echo "==> Building U-Boot (-j${JOBS})..."
 make -C "${UBOOT_SRC}" \
     ARCH="${ARCH}" \
     CROSS_COMPILE="${CROSS_COMPILE}" \
+    PYTHON2="${PYTHON2}" \
     BL31="${TFA_BL31}" \
     SCP=/dev/null \
     O="${BUILD_DIR}" \

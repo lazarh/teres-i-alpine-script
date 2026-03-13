@@ -2,8 +2,13 @@
 #
 # Linux MMC enumeration on the Teres-I (A64):
 #   mmc@1c0f000 → mmc0 / mmcblk0  : SD card slot
-#   mmc@1c10000 → mmc1             : SDIO WiFi (BCM43438/RTL8723BS) — no block device
-#   mmc@1c11000 → mmc2 / mmcblk2  : internal eMMC/NAND
+#   mmc@1c10000 → mmc1            : SDIO WiFi (BCM43438/RTL8723BS) — no block device
+#   mmc@1c11000 → mmc2 / mmcblk2  : internal eMMC
+#
+# U-Boot numbers the same controllers differently on this board:
+#   mmc 0 = SD card slot
+#   mmc 1 = internal eMMC
+#   mmc 2 = SDIO WiFi
 #
 # The SDIO WiFi chip does NOT create a mmcblk device, so the SD card is
 # always mmcblk0 regardless of WiFi chip presence.

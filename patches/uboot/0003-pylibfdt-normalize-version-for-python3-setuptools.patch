@@ -1,0 +1,12 @@
+--- a/scripts/dtc/pylibfdt/setup.py	2019-10-08 00:14:02.000000000 +0300
++++ b/scripts/dtc/pylibfdt/setup.py	2026-03-12 22:06:51.557762645 +0200
+@@ -105,6 +105,9 @@
+ if not all((swig_opts, version, files, cflags, objdir)):
+     swig_opts, version, files, cflags, objdir = GetEnvFromMakefiles()
+ 
++if version.startswith('u-boot-'):
++    version = version[len('u-boot-'):]
++
+ libfdt_module = Extension(
+     '_libfdt',
+     sources = files,
