@@ -105,14 +105,28 @@ cp -a /boot/. "${WORK_DIR}/boot/"
 # U-Boot binary is flashed raw — no need in the FAT partition
 rm -f "${WORK_DIR}/boot/u-boot-sunxi-with-spl.bin"
 
-# Generate an eMMC-specific boot.scr (root on mmcblk2p2, U-Boot mmc 1)
+# Generate an eMMC-specific boot.scr based on boot/boot.cmd
+# (mmc 1:1 for eMMC, root on mmcblk2p2)
 echo "==> Generating eMMC boot script..."
 EMMC_BOOT_CMD=$(mktemp /tmp/emmc-boot.XXXXXX.cmd)
 cat > "${EMMC_BOOT_CMD}" <<'BOOTCMD'
-# Boot from eMMC on Teres-I
-load mmc 1:1 ${kernel_addr_r} Image
+# Boot from eMMC on Olimex Teres-I.
+#
+# Linux MMC enumeration on the Teres-I (A64):
+#   mmc@1c0f000 → mmc0 / mmcblk0  : SD card slot
+#   mmc@1c10000 → mmc1            : SDIO WiFi (BCM43438/RTL8723BS) — no block device
+#   mmc@1c11000 → mmc2 / mmcblk2  : internal eMMC
+#
+# U-Boot numbers the same controllers differently on this board:
+#   mmc 0 = SD card slot
+#   mmc 1 = internal eMMC
+#   mmc 2 = SDIO WiFi
+#
+# Uses booti (not bootz) because the kernel image is arm64 Image.
+
+setenv bootargs console=ttyS0,115200 console=tty1 root=/dev/mmcblk2p2 rootwait panic=10 ${extra}
 load mmc 1:1 ${fdt_addr_r} sun50i-a64-teres-i.dtb
-setenv bootargs console=ttyS0,115200 console=tty1 root=/dev/mmcblk2p2 rootfstype=ext4 rootwait panic=10 ${extra}
+load mmc 1:1 ${kernel_addr_r} Image
 booti ${kernel_addr_r} - ${fdt_addr_r}
 BOOTCMD
 mkimage -C none -A arm64 -T script \
