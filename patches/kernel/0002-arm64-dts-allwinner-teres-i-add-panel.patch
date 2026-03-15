@@ -1,26 +1,22 @@
 From: User <user@example.com>
-Subject: [PATCH] arm64: dts: allwinner: teres-i: add panel and keep ANX6345 regulators on
+Subject: [PATCH] arm64: dts: allwinner: teres-i: add panel for ANX6345 eDP bridge
 
-The ANX6345 eDP bridge on the Teres-I is powered by DLDO2 (2.5V, dvdd25)
-and DLDO3 (1.2V, dvdd12) from the AXP803 PMIC. These regulators are off
-by default on cold boot, causing the ANX6345 to be unpowered when the
-kernel bridge driver probes.
-
-Add the innolux,n116bge panel node and connect it to anx6345. Without a
-panel node, the DRM subsystem won't initialize the display pipeline.
+Add the innolux,n116bge panel node in chosen and connect it to anx6345.
+Without a panel node, the DRM subsystem won't initialize the display
+pipeline. Also add the port@1 endpoint on anx6345 to connect to the panel.
 
 Signed-off-by: User <user@example.com>
 ---
- arch/arm64/boot/dts/allwinner/sun50i-a64-teres-i.dts | 36 +++++++++++++++++++++
- 1 file changed, 36 insertions(+)
+ arch/arm64/boot/dts/allwinner/sun50i-a64-teres-i.dts | 23 +++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/allwinner/sun50i-a64-teres-i.dts b/arch/arm64/boot/dts/allwinner/sun50i-a64-teres-i.dts
 index abcdef1..1234567 100644
 --- a/arch/arm64/boot/dts/allwinner/sun50i-a64-teres-i.dts
 +++ b/arch/arm64/boot/dts/allwinner/sun50i-a64-teres-i.dts
-@@ -26,6 +26,24 @@
- 	chosen {
- 		stdout-path = "serial0:115200n8";
+@@ -35,6 +35,16 @@
+ 			eDP12-supply = <&reg_dldo3>;
+ 		};
  
 +		panel {
 +			compatible = "innolux,n116bge", "simple-panel";
@@ -33,37 +29,22 @@ index abcdef1..1234567 100644
 +				};
 +			};
 +		};
-+
- 		framebuffer-lcd {
- 			eDP25-supply = <&reg_dldo2>;
- 			eDP12-supply = <&reg_dldo3>
-@@ -120,6 +138,18 @@
  	};
- };
  
-+&anx6345 {
-+	ports {
-+		port@1 {
-+			reg = <1>;
-+			anx6345_out: endpoint {
-+				remote-endpoint = <&panel_in>;
-+			};
-+		};
-+	};
-+};
+ 	gpio-keys {
+@@ -145,6 +155,13 @@
+ 				anx6345_in: endpoint {
+ 					remote-endpoint = <&tcon0_out_anx6345>;
+ 				};
+ 			};
 +
- &reg_dldo2 {
- 	regulator-min-microvolt = <2500000>;
- 	regulator-max-microvolt = <2500000>;
- 	regulator-name = "vcc-pd";
-+	regulator-always-on;
-+	regulator-boot-on;
- };
- 
- &reg_dldo3 {
- 	regulator-min-microvolt = <1200000>;
- 	regulator-max-microvolt = <1200000>;
- 	regulator-name = "vdd-edp";
-+	regulator-always-on;
-+	regulator-boot-on;
++			port@1 {
++				reg = <1>;
++
++				anx6345_out: endpoint {
++					remote-endpoint = <&panel_in>;
++				};
++			};
+ 		};
+ 	};
  };
