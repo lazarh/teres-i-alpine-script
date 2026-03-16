@@ -1,0 +1,14 @@
+[Unit]
+Description=Check eDP display and reboot if not connected
+After=multi-user.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/local/bin/check-edp.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

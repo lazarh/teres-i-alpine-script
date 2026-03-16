@@ -219,7 +219,7 @@ chroot "${SYSROOT}" systemctl enable resize-rootfs.service || true
 # Reboots if the eDP display is not connected on boot (cold boot workaround)
 
 echo "==> Setting up eDP display check service..."
-install -m 0755 "${REPO_ROOT}/build/rootfs-services/check-edp.sh" \
+install -m 0755 "${REPO_ROOT}/services/check-edp.sh" \
     "${SYSROOT}/usr/local/sbin/check-edp.sh"
 
 cat > "${SYSROOT}/etc/systemd/system/check-edp.service" <<'UNIT'
