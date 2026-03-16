@@ -215,6 +215,32 @@ UNIT
 
 chroot "${SYSROOT}" systemctl enable resize-rootfs.service || true
 
+# ── eDP display check service ────────────────────────────────────────────────
+# Reboots if the eDP display is not connected on boot (cold boot workaround)
+
+echo "==> Setting up eDP display check service..."
+install -m 0755 "${REPO_ROOT}/build/rootfs-services/check-edp.sh" \
+    "${SYSROOT}/usr/local/sbin/check-edp.sh"
+
+cat > "${SYSROOT}/etc/systemd/system/check-edp.service" <<'UNIT'
+[Unit]
+Description=Check eDP display and reboot if not connected
+After=multi-user.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/local/bin/check-edp.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+chroot "${SYSROOT}" systemctl enable check-edp.service || true
+
 # ── Embed install-to-nand.sh ────────────────────────────────────────────────
 
 echo "==> Embedding install-to-nand.sh..."
