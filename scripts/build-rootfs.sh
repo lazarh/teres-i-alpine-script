@@ -8,7 +8,7 @@
 #   2. scripts/build-kernel.sh    (produces build/kernel/modules/ and Image)
 #
 # Environment variables:
-#   HOSTNAME=myteres    — set board hostname (default: teres-i)
+#   BOARD_HOSTNAME=myteres — set board hostname (default: teres-i)
 #   WIFI_SSID=MyNetwork — pre-configure WiFi (requires WIFI_PASSWORD)
 #   WIFI_PASSWORD=secret — WPA2 passphrase for WIFI_SSID
 #
@@ -22,7 +22,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SYSROOT="${REPO_ROOT}/debian-rootfs"
 KERNEL_BUILD="${REPO_ROOT}/build/kernel"
 MODULES_DIR="${KERNEL_BUILD}/modules"
-HOSTNAME="${HOSTNAME:-teres-i}"
+BOARD_HOSTNAME="${BOARD_HOSTNAME:-teres-i}"
 WIFI_SSID="${WIFI_SSID:-}"
 WIFI_PASSWORD="${WIFI_PASSWORD:-}"
 ARCH=arm64
@@ -94,10 +94,10 @@ deb ${MIRROR} ${SUITE}-updates main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security ${SUITE}-security main contrib non-free non-free-firmware
 EOF
 
-echo "${HOSTNAME}" > "${SYSROOT}/etc/hostname"
+echo "${BOARD_HOSTNAME}" > "${SYSROOT}/etc/hostname"
 cat > "${SYSROOT}/etc/hosts" <<EOF
 127.0.0.1  localhost
-127.0.1.1  ${HOSTNAME}
+127.0.1.1  ${BOARD_HOSTNAME}
 ::1        localhost ip6-localhost ip6-loopback
 EOF
 
@@ -305,6 +305,6 @@ rm -rf "${SYSROOT}/var/lib/apt/lists/"*
 
 echo ""
 echo "==> Debian 13 (trixie) arm64 rootfs ready at: ${SYSROOT}"
-echo "    HOSTNAME  was: ${HOSTNAME}"
+echo "    BOARD_HOSTNAME was: ${BOARD_HOSTNAME}"
 echo "    WIFI_SSID was: ${WIFI_SSID:-<not set>}"
 echo "    Next step: sudo scripts/assemble-sd-image.sh"
