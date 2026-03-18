@@ -24,9 +24,7 @@ TFA_URL="https://github.com/ARM-software/arm-trusted-firmware/archive/refs/tags/
 TFA_SHA256=""  # Set to SHA256 of the tarball to enable verification
 
 # U-Boot
-# This branch defaults to the older v2019.10 release for ANX6345 bring-up
-# comparison, but you can still override it for one-off experiments.
-UBOOT_VERSION="${UBOOT_VERSION:-2019.10}"
+UBOOT_VERSION="${UBOOT_VERSION:-2024.01}"
 UBOOT_URL="https://ftp.denx.de/pub/u-boot/u-boot-${UBOOT_VERSION}.tar.bz2"
 UBOOT_SHA256=""  # Set to SHA256 of the tarball to enable verification
 

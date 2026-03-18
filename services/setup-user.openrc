@@ -1,0 +1,28 @@
+#!/sbin/openrc-run
+# setup-user — Create non-root user with sudo access on first boot
+
+description="Create default user account if it does not exist"
+USER_NAME="user"
+
+depend() {
+    need localmount
+    keyword -prefix
+}
+
+start() {
+    ebegin "Checking for user '${USER_NAME}'"
+
+    if id "${USER_NAME}" >/dev/null 2>&1; then
+        einfo "User '${USER_NAME}' already exists"
+    else
+        einfo "Creating user '${USER_NAME}' with sudo access..."
+        adduser -D -G wheel -s /bin/sh "${USER_NAME}"
+        echo "${USER_NAME}:${USER_NAME}" | chpasswd
+        einfo "User '${USER_NAME}' created (password: ${USER_NAME})"
+        einfo "Change your password after first login!"
+    fi
+
+    einfo "Disabling setup-user service (one-shot)"
+    rc-update del setup-user default
+    eend 0
+}

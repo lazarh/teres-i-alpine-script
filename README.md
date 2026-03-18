@@ -1,10 +1,12 @@
-# Teres-I — Standalone Debian Build System
+# Teres-I — Alpine Linux + DWM Build System
 
-Build ARM Trusted Firmware, U-Boot, Linux kernel, and a Debian 13 (trixie) arm64
-root filesystem for the [Olimex Teres-I](https://github.com/OLIMEX/DIY-LAPTOP)
-DIY laptop (Allwinner A64 / sun50i-a64, ARM Cortex-A53 AArch64).
+Build ARM Trusted Firmware, U-Boot, Linux kernel, and an Alpine Linux arm64
+root filesystem with DWM (suckless window manager) for the
+[Olimex Teres-I](https://github.com/OLIMEX/DIY-LAPTOP) DIY laptop
+(Allwinner A64 / sun50i-a64, ARM Cortex-A53 AArch64).
 
-No Yocto required — everything is built via direct cross-compilation and `debootstrap`.
+No Yocto required — everything is built via direct cross-compilation and
+Alpine minirootfs bootstrap.
 
 ## Quick Start
 
@@ -31,16 +33,16 @@ Produces:
 - `build/kernel/sun50i-a64-teres-i.dtb`
 - `build/kernel/modules/`
 
-### 4. Build the Debian rootfs (as root)
+### 4. Build the Alpine rootfs (as root)
 ```bash
 sudo scripts/build-rootfs.sh
 ```
-Produces `debian-rootfs/`.
+Produces `alpine-rootfs/`.
 
 To pre-configure the hostname or WiFi:
 ```bash
 # Set hostname at image build time (defaults to 'teres-i')
-sudo HOSTNAME="mylaptop" scripts/build-rootfs.sh
+sudo BOARD_HOSTNAME="mylaptop" scripts/build-rootfs.sh
 
 # Pre-configure WiFi (requires WIFI_PASSWORD)
 sudo WIFI_SSID="MyNetwork" WIFI_PASSWORD="secret" scripts/build-rootfs.sh
@@ -54,15 +56,15 @@ sudo scripts/assemble-sd-image.sh
 # Or specify an explicit output image path:
 sudo scripts/assemble-sd-image.sh /path/to/output.img
 ```
-Produces `teres-i-debian13.img.gz` (and `.bmap`).
+Produces `teres-i-alpine.img.gz` (and `.bmap`).
 
 ### 6. Flash to SD card
 ```bash
 # Preferred (fast, sparse-aware):
-bmaptool copy teres-i-debian13.img.gz /dev/sdX
+bmaptool copy teres-i-alpine.img.gz /dev/sdX
 
 # Alternative:
-zcat teres-i-debian13.img.gz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+zcat teres-i-alpine.img.gz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
 ### 7. First boot — install to internal eMMC
@@ -80,11 +82,35 @@ partition. Remove the SD card and reboot; the board will boot from eMMC.
 
 | | |
 |---|---|
-| User | `root` |
-| Password | `root` |
+| Root user | `root` / `root` |
+| Default user | `user` / `user` (created on first boot, has sudo) |
 | Serial console | `ttyS0 @ 115200` |
 
-**Change the root password on first boot.**
+**Change passwords on first boot.**
+
+## What's included
+
+### Desktop environment
+- **DWM** (dynamic window manager) — auto-starts on tty1 login
+- **dmenu** — application launcher (Alt+P)
+- **st** / terminal — suckless terminal
+- **Xorg** with modesetting driver + Lima (Mali-400 GPU)
+
+### Hardware support
+- **Display**: ANX6345 eDP bridge, innolux 11.6" panel, eDP cold-boot workaround service
+- **Audio**: ALSA with Allwinner A64 codec (headphone + line out), auto-configured on boot
+- **Battery**: AXP803 PMIC monitoring via `teres-battery` command
+- **Brightness**: `light` command for backlight control
+- **WiFi**: AP6212 (BCM43438) or RTL8723BS via NetworkManager
+- **Bluetooth**: BCM or RTL (SDIO/UART)
+
+### System services (OpenRC)
+- `check-edp` — reboots if eDP display not detected (cold boot workaround)
+- `resize-rootfs` — expands root partition on first boot
+- `setup-user` — creates `user` account with sudo on first boot
+- `networkmanager` — WiFi/network management
+- `sshd` — SSH server
+- `chronyd` — NTP time sync
 
 ## SD card partition layout
 
@@ -92,7 +118,7 @@ partition. Remove the SD card and reboot; the board will boot from eMMC.
 |---|---|
 | Raw offset 8 KiB | U-Boot SPL + TF-A BL31 + U-Boot proper |
 | Partition 1 (FAT32, 80 MiB) | `/boot` — Image, DTB, boot.scr, u-boot-sunxi-with-spl.bin |
-| Partition 2 (ext4, rest) | `/` — Debian rootfs |
+| Partition 2 (ext4, rest) | `/` — Alpine rootfs |
 
 ## eMMC layout (after `install-to-nand.sh`)
 
@@ -100,7 +126,7 @@ partition. Remove the SD card and reboot; the board will boot from eMMC.
 |---|---|
 | Raw offset 8 KiB | U-Boot SPL + TF-A BL31 + U-Boot proper |
 | Partition 1 (FAT32, 80 MiB) | `/boot` — Image, DTB, boot.scr |
-| Partition 2 (ext4, rest) | `/` — Debian rootfs |
+| Partition 2 (ext4, rest) | `/` — Alpine rootfs |
 
 Linux exposes the internal storage as `/dev/mmcblk2`, but U-Boot enumerates the
 same controller as `mmc 1` on this board. The eMMC `boot.scr` therefore loads
@@ -114,15 +140,17 @@ the kernel from `mmc 1:1` and boots with
 | ARM Trusted Firmware | v2.10.0, `sun50i_a64` platform |
 | U-Boot | 2024.01, `teres_i_defconfig` |
 | U-Boot flash offset | 8 KiB (same as all sunxi boards) |
-| Kernel | 6.6.85, arm64 `defconfig` + `configs/kernel/teres-i.config` |
+| Kernel | 6.12.18, arm64 `defconfig` + `configs/kernel/teres-i.config` |
 | Kernel image | `Image` (uncompressed AArch64) |
 | Kernel boot command | `booti` |
 | DTB | `sun50i-a64-teres-i.dtb` |
 | Cross-compiler | `aarch64-linux-gnu-` (override via `CROSS_COMPILE=`) |
 | Parallel jobs | `$(nproc)` (override via `JOBS=N`) |
-| Debian suite | trixie (13), arm64 |
+| Alpine version | 3.21, arm64 (minirootfs bootstrap) |
+| Init system | OpenRC |
+| Window manager | DWM (suckless) |
 | WiFi | AP6212 (BCM43438, `brcmfmac`) or RTL8723BS (`rtl8723bs`) |
-| Hostname pre-config | Optional — `HOSTNAME=mylaptop` |
+| Hostname pre-config | Optional — `BOARD_HOSTNAME=mylaptop` |
 | WiFi pre-config | Optional — `WIFI_SSID=... WIFI_PASSWORD=...` |
 
 ## Patches

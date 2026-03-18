@@ -1,0 +1,27 @@
+#!/sbin/openrc-run
+# resize-rootfs — Expand root partition to fill storage on first boot
+
+description="Expand root partition to fill storage"
+
+depend() {
+    need localmount
+    keyword -prefix
+}
+
+start() {
+    ebegin "Expanding root partition"
+
+    local root_part root_dev part_num
+
+    root_part=$(findmnt -n -o SOURCE /)
+    root_dev=$(lsblk -n -o PKNAME "${root_part}" | head -1)
+    part_num=$(cat "/sys/class/block/$(basename "${root_part}")/partition")
+
+    einfo "Expanding /dev/${root_dev} partition ${part_num}..."
+    growpart "/dev/${root_dev}" "${part_num}" || true
+    resize2fs "${root_part}" || true
+
+    einfo "Disabling resize-rootfs service (one-shot)"
+    rc-update del resize-rootfs default
+    eend 0
+}

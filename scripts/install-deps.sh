@@ -8,7 +8,7 @@
 #   - aarch64-linux-gnu cross-compiler (kernel, U-Boot, TF-A)
 #   - ARM Trusted Firmware build dependencies
 #   - Kernel build tools
-#   - debootstrap + qemu-user-static for arm64 rootfs
+#   - qemu-user-static for arm64 chroot (Alpine rootfs)
 #   - Image assembly tools
 
 set -euo pipefail
@@ -29,7 +29,6 @@ apt-get install -y --no-install-recommends \
     libglib2.0-dev \
     device-tree-compiler \
     u-boot-tools \
-    debootstrap \
     qemu-user-static \
     binfmt-support \
     parted \
@@ -44,8 +43,7 @@ apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
     python3 \
-    python3-cryptography \
-    mtd-utils
+    python3-cryptography
 
 echo ""
 echo "==> All build dependencies installed."

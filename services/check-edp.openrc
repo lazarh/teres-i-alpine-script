@@ -1,0 +1,30 @@
+#!/sbin/openrc-run
+# check-edp — Reboot if eDP display is not connected (cold boot workaround)
+
+description="Check eDP display and reboot if not connected"
+
+depend() {
+    after modules
+    keyword -prefix
+}
+
+start() {
+    ebegin "Checking eDP display connection"
+
+    # Wait for DRM to initialize
+    sleep 2
+
+    # card0-Unknown-1 is the eDP connector on Teres-I
+    local edp_status
+    edp_status=$(cat /sys/class/drm/card0-Unknown-1/status 2>/dev/null)
+
+    if [ "$edp_status" != "connected" ]; then
+        ewarn "eDP not connected (status: ${edp_status:-unknown}), rebooting in 5 seconds..."
+        sleep 5
+        reboot
+        eend 1
+    else
+        einfo "eDP is connected"
+        eend 0
+    fi
+}

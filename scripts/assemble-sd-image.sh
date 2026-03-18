@@ -9,9 +9,9 @@
 # Must be run as root (loop device + mount).
 #
 # Output:
-#   teres-i-debian13.img        (default, under repo root)
-#   teres-i-debian13.img.gz     (compressed)
-#   teres-i-debian13.img.gz.bmap (bmaptool map, when bmaptool is available)
+#   teres-i-alpine.img        (default, under repo root)
+#   teres-i-alpine.img.gz     (compressed)
+#   teres-i-alpine.img.gz.bmap (bmaptool map, when bmaptool is available)
 #
 #   Override the output path by passing it as the first argument:
 #     sudo scripts/assemble-sd-image.sh /path/to/output.img
@@ -21,10 +21,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-SYSROOT="${REPO_ROOT}/debian-rootfs"
+SYSROOT="${REPO_ROOT}/alpine-rootfs"
 UBOOT_BUILD="${REPO_ROOT}/build/uboot"
 KERNEL_BUILD="${REPO_ROOT}/build/kernel"
-OUTPUT="${1:-${REPO_ROOT}/teres-i-debian13.img}"
+OUTPUT="${1:-${REPO_ROOT}/teres-i-alpine.img}"
 
 BOOT_SIZE_MIB=80       # FAT boot partition size in MiB (within the 40 MiB gap + 80 MiB boundary)
 IMAGE_SIZE_MIB=3200    # Total image size (~3 GiB; grows to fill storage after install)
@@ -46,7 +46,7 @@ WORK_DIR=$(mktemp -d)
 trap cleanup EXIT
 
 [[ $EUID -eq 0 ]] || die "Must be run as root"
-[[ -d "${SYSROOT}" ]] || die "debian-rootfs/ not found — run scripts/build-rootfs.sh first"
+[[ -d "${SYSROOT}" ]] || die "alpine-rootfs/ not found — run scripts/build-rootfs.sh first"
 
 # ── Locate artifacts ───────────────────────────────────────────────────────
 

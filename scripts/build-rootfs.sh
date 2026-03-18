@@ -1,10 +1,10 @@
 #!/bin/bash
-# build-rootfs.sh — Bootstrap a Debian 13 (trixie) arm64 rootfs for Teres-I.
+# build-rootfs.sh — Bootstrap an Alpine Linux arm64 rootfs for Teres-I.
 #
 # Must be run as root on an x86-64 Debian/Ubuntu build host.
 #
 # Prerequisites:
-#   1. scripts/install-deps.sh    (installs debootstrap, qemu-user-static, etc.)
+#   1. scripts/install-deps.sh    (installs qemu-user-static, etc.)
 #   2. scripts/build-kernel.sh    (produces build/kernel/modules/ and Image)
 #
 # Environment variables:
@@ -12,28 +12,30 @@
 #   WIFI_SSID=MyNetwork — pre-configure WiFi (requires WIFI_PASSWORD)
 #   WIFI_PASSWORD=secret — WPA2 passphrase for WIFI_SSID
 #
-# Produces: debian-rootfs/
+# Produces: alpine-rootfs/
 # Consumed by: scripts/assemble-sd-image.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-SYSROOT="${REPO_ROOT}/debian-rootfs"
+SYSROOT="${REPO_ROOT}/alpine-rootfs"
 KERNEL_BUILD="${REPO_ROOT}/build/kernel"
 MODULES_DIR="${KERNEL_BUILD}/modules"
 BOARD_HOSTNAME="${BOARD_HOSTNAME:-teres-i}"
 WIFI_SSID="${WIFI_SSID:-}"
 WIFI_PASSWORD="${WIFI_PASSWORD:-}"
-ARCH=arm64
-SUITE=trixie
-MIRROR=http://deb.debian.org/debian
+
+ALPINE_VERSION="3.21"
+ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine"
+ALPINE_ARCH="aarch64"
+ALPINE_MINIROOTFS_URL="${ALPINE_MIRROR}/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/alpine-minirootfs-${ALPINE_VERSION}.0-${ALPINE_ARCH}.tar.gz"
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-[[ $EUID -eq 0 ]] || die "Must be run as root (debootstrap requires chroot)"
+[[ $EUID -eq 0 ]] || die "Must be run as root (chroot requires root)"
 
 [[ -d "${KERNEL_BUILD}" ]] || die "build/kernel/ not found — run scripts/build-kernel.sh first"
 [[ -f "${KERNEL_BUILD}/Image" ]] || die "build/kernel/Image not found — run scripts/build-kernel.sh first"
@@ -56,43 +58,46 @@ umount_chroot() {
 
 trap umount_chroot EXIT
 
-command -v debootstrap          >/dev/null || die "debootstrap not found — run scripts/install-deps.sh"
-command -v qemu-aarch64-static  >/dev/null || die "qemu-user-static not found — run scripts/install-deps.sh"
+command -v qemu-aarch64-static >/dev/null || die "qemu-user-static not found — run scripts/install-deps.sh"
 
-# ── First stage debootstrap ─────────────────────────────────────────────────
+# ── Download Alpine minirootfs ──────────────────────────────────────────────
 
-echo "==> Stage 1: debootstrap ${SUITE} ${ARCH} into ${SYSROOT}"
-if [[ -d "${SYSROOT}/debootstrap" ]]; then
-    echo "    Stage 1 already done, skipping."
+SOURCES_DIR="${REPO_ROOT}/build/sources"
+mkdir -p "${SOURCES_DIR}"
+ALPINE_TARBALL="${SOURCES_DIR}/alpine-minirootfs-${ALPINE_VERSION}.0-${ALPINE_ARCH}.tar.gz"
+
+if [[ ! -f "${ALPINE_TARBALL}" ]]; then
+    echo "==> Downloading Alpine minirootfs ${ALPINE_VERSION} (${ALPINE_ARCH})..."
+    curl -fL --progress-bar "${ALPINE_MINIROOTFS_URL}" -o "${ALPINE_TARBALL}"
+fi
+
+# ── Extract minirootfs ──────────────────────────────────────────────────────
+
+if [[ -d "${SYSROOT}" && -f "${SYSROOT}/etc/alpine-release" ]]; then
+    echo "==> Alpine rootfs already extracted, skipping."
 else
+    echo "==> Extracting Alpine minirootfs into ${SYSROOT}..."
     rm -rf "${SYSROOT}"
-    debootstrap \
-        --arch="${ARCH}" \
-        --foreign \
-        --components=main,contrib,non-free,non-free-firmware \
-        --include=ca-certificates,curl,gnupg,locales,apt-transport-https \
-        "${SUITE}" "${SYSROOT}" "${MIRROR}"
+    mkdir -p "${SYSROOT}"
+    tar -xzf "${ALPINE_TARBALL}" -C "${SYSROOT}"
 fi
 
 # Copy QEMU binary so the chroot can execute AArch64 binaries on x86
 cp /usr/bin/qemu-aarch64-static "${SYSROOT}/usr/bin/"
 
-# ── Second stage (inside chroot) ────────────────────────────────────────────
-
-echo "==> Stage 2: debootstrap second stage inside chroot"
-chroot "${SYSROOT}" /debootstrap/debootstrap --second-stage
-
 mount_chroot
+
+# ── Configure APK repositories ──────────────────────────────────────────────
+
+echo "==> Configuring Alpine repositories..."
+cat > "${SYSROOT}/etc/apk/repositories" <<EOF
+${ALPINE_MIRROR}/v${ALPINE_VERSION}/main
+${ALPINE_MIRROR}/v${ALPINE_VERSION}/community
+EOF
 
 # ── Configure the system ────────────────────────────────────────────────────
 
-echo "==> Configuring Debian system..."
-
-cat > "${SYSROOT}/etc/apt/sources.list" <<EOF
-deb ${MIRROR} ${SUITE} main contrib non-free non-free-firmware
-deb ${MIRROR} ${SUITE}-updates main contrib non-free non-free-firmware
-deb http://security.debian.org/debian-security ${SUITE}-security main contrib non-free non-free-firmware
-EOF
+echo "==> Configuring Alpine system..."
 
 echo "${BOARD_HOSTNAME}" > "${SYSROOT}/etc/hostname"
 cat > "${SYSROOT}/etc/hosts" <<EOF
@@ -101,12 +106,6 @@ cat > "${SYSROOT}/etc/hosts" <<EOF
 ::1        localhost ip6-localhost ip6-loopback
 EOF
 
-echo "en_US.UTF-8 UTF-8" >> "${SYSROOT}/etc/locale.gen"
-chroot "${SYSROOT}" locale-gen
-
-echo "UTC" > "${SYSROOT}/etc/timezone"
-chroot "${SYSROOT}" dpkg-reconfigure -f noninteractive tzdata
-
 # /etc/fstab for SD card boot; overwritten by install-to-nand.sh for eMMC boot
 cat > "${SYSROOT}/etc/fstab" <<EOF
 /dev/mmcblk0p2  /      ext4  defaults,noatime  0  1
@@ -114,36 +113,83 @@ cat > "${SYSROOT}/etc/fstab" <<EOF
 tmpfs           /tmp   tmpfs defaults,nosuid,nodev  0  0
 EOF
 
-# Enable serial console (ttyS0 = Allwinner UART0 on A64)
-chroot "${SYSROOT}" systemctl enable serial-getty@ttyS0.service || true
+# ── Install packages ────────────────────────────────────────────────────────
 
-# ── Install base packages ───────────────────────────────────────────────────
+echo "==> Installing Alpine packages..."
+chroot "${SYSROOT}" apk update
 
-echo "==> Installing packages..."
-chroot "${SYSROOT}" apt-get update -q
-chroot "${SYSROOT}" apt-get install -y --no-install-recommends \
-    systemd-sysv dbus systemd-timesyncd \
-    iproute2 iputils-ping iw wpasupplicant network-manager \
-    openssh-server \
-    firmware-brcm80211 \
-    firmware-realtek \
-    usbutils pciutils \
-    vim-tiny less \
-    util-linux e2fsprogs dosfstools parted cloud-guest-utils \
-    rsync wget curl \
-    mtd-utils \
-    u-boot-tools \
-    kmod iptables conntrack nftables
+# Base system + OpenRC
+chroot "${SYSROOT}" apk add --no-cache \
+    alpine-base openrc busybox-extras shadow sudo \
+    eudev eudev-openrc \
+    util-linux e2fsprogs dosfstools parted \
+    rsync curl wget ca-certificates \
+    kmod \
+    iproute2 iputils iptables nftables
+
+# Networking — NetworkManager + WiFi
+chroot "${SYSROOT}" apk add --no-cache \
+    networkmanager networkmanager-wifi networkmanager-openrc \
+    wpa_supplicant iw
+
+# WiFi firmware
+chroot "${SYSROOT}" apk add --no-cache \
+    linux-firmware-brcm linux-firmware-rtlwifi
+
+# SSH
+chroot "${SYSROOT}" apk add --no-cache \
+    openssh openssh-server-pam openssh-openrc
+
+# NTP
+chroot "${SYSROOT}" apk add --no-cache \
+    chrony chrony-openrc
+
+# Display / Xorg
+chroot "${SYSROOT}" apk add --no-cache \
+    xorg-server xf86-video-modesetting xinit xrandr xset setxkbmap \
+    mesa-dri-gallium mesa-gl \
+    xf86-input-libinput
+
+# DWM / suckless
+chroot "${SYSROOT}" apk add --no-cache \
+    dwm dmenu st-terminfo || {
+    echo "    NOTE: dwm/dmenu not in repo, installing build deps for manual build"
+    chroot "${SYSROOT}" apk add --no-cache \
+        build-base libx11-dev libxft-dev libxinerama-dev
+}
+
+# Fonts (needed for X11)
+chroot "${SYSROOT}" apk add --no-cache \
+    font-dejavu font-noto ttf-font-awesome
+
+# Audio — ALSA
+chroot "${SYSROOT}" apk add --no-cache \
+    alsa-utils alsa-lib alsaconf || \
+    chroot "${SYSROOT}" apk add --no-cache alsa-utils alsa-lib
+
+# Brightness control
+chroot "${SYSROOT}" apk add --no-cache \
+    light || true
+
+# Battery/power monitoring (sysfs-based, script provided)
+# No extra package needed — uses /sys/class/power_supply/
+
+# Editors and utilities
+chroot "${SYSROOT}" apk add --no-cache \
+    vim less htop
+
+# Cloud/resize tools
+chroot "${SYSROOT}" apk add --no-cache \
+    cloud-utils-growpart || chroot "${SYSROOT}" apk add --no-cache growpart || true
 
 # ── Kernel modules ──────────────────────────────────────────────────────────
 
 echo "==> Installing kernel modules from ${MODULES_DIR}..."
 if [[ -d "${MODULES_DIR}/lib/modules" ]]; then
-    # Debian trixie uses usrmerge (/lib -> usr/lib symlink).
-    # Copy into usr/ so modules land at usr/lib/modules without breaking the symlink.
-    cp -a "${MODULES_DIR}/lib/modules" "${SYSROOT}/usr/lib/"
-    KVER=$(ls "${SYSROOT}/usr/lib/modules/" | head -1)
-    if ! chroot "${SYSROOT}" depmod -a "${KVER}"; then
+    mkdir -p "${SYSROOT}/lib/modules"
+    cp -a "${MODULES_DIR}/lib/modules/"* "${SYSROOT}/lib/modules/"
+    KVER=$(ls "${SYSROOT}/lib/modules/" | head -1)
+    if ! chroot "${SYSROOT}" depmod -a "${KVER}" 2>/dev/null; then
         echo "    WARNING: depmod failed for kernel ${KVER} — modules may not load at boot"
     fi
     echo "    Installed modules for kernel ${KVER}"
@@ -153,9 +199,15 @@ fi
 
 # ── WiFi firmware ───────────────────────────────────────────────────────────
 # Teres-I uses AP6212 (BCM43438) or RTL8723BS depending on board revision.
-# firmware-brcm80211 covers BCM43438; firmware-realtek covers RTL8723BS.
 # Load brcmfmac and rtl8723bs at boot so whichever chip is present is found.
 
+mkdir -p "${SYSROOT}/etc/modules-load.d"
+cat > "${SYSROOT}/etc/modules-load.d/teres-wifi.conf" <<EOF
+brcmfmac
+rtl8723bs
+EOF
+
+# Also add to /etc/modules for OpenRC
 echo "brcmfmac"  >> "${SYSROOT}/etc/modules"
 echo "rtl8723bs" >> "${SYSROOT}/etc/modules"
 
@@ -166,80 +218,78 @@ sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' \
     "${SYSROOT}/etc/ssh/sshd_config"
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' \
     "${SYSROOT}/etc/ssh/sshd_config"
-chroot "${SYSROOT}" systemctl enable ssh.service || true
 
-# ── NTP ─────────────────────────────────────────────────────────────────────
+# ── Serial console ──────────────────────────────────────────────────────────
+# Alpine uses /etc/inittab for getty management
 
-echo "==> Enabling systemd-timesyncd (NTP)..."
-chroot "${SYSROOT}" systemctl enable systemd-timesyncd.service || true
+echo "==> Configuring serial console (ttyS0)..."
+if ! grep -q "ttyS0" "${SYSROOT}/etc/inittab" 2>/dev/null; then
+    echo "ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100" >> "${SYSROOT}/etc/inittab"
+fi
 
-# ── First-boot partition resize ─────────────────────────────────────────────
+# ── Timezone ────────────────────────────────────────────────────────────────
 
-echo "==> Installing first-boot partition resize service..."
+chroot "${SYSROOT}" apk add --no-cache tzdata || true
+cp "${SYSROOT}/usr/share/zoneinfo/UTC" "${SYSROOT}/etc/localtime" || true
+echo "UTC" > "${SYSROOT}/etc/timezone"
 
-cat > "${SYSROOT}/usr/local/sbin/resize-rootfs.sh" <<'RESIZE_SCRIPT'
-#!/bin/bash
-# Expand the root partition and filesystem to fill the entire storage device.
-# Runs once on first boot, then disables itself.
-set -e
+# ── OpenRC services ─────────────────────────────────────────────────────────
 
-ROOT_PART=$(findmnt -n -o SOURCE /)
-ROOT_DEV=$(lsblk -n -o PKNAME "${ROOT_PART}" | head -1)
-PART_NUM=$(cat /sys/class/block/$(basename "${ROOT_PART}")/partition)
+echo "==> Setting up OpenRC services..."
 
-echo "resize-rootfs: expanding /dev/${ROOT_DEV} partition ${PART_NUM}..."
-growpart "/dev/${ROOT_DEV}" "${PART_NUM}" || true
-resize2fs "${ROOT_PART}" || true
+# eDP display check service (cold boot workaround)
+install -m 0755 "${REPO_ROOT}/services/check-edp.openrc" \
+    "${SYSROOT}/etc/init.d/check-edp"
+chroot "${SYSROOT}" rc-update add check-edp default || true
 
-echo "resize-rootfs: done, disabling service"
-systemctl disable resize-rootfs.service
-rm -f /etc/systemd/system/resize-rootfs.service
-RESIZE_SCRIPT
-chmod 0755 "${SYSROOT}/usr/local/sbin/resize-rootfs.sh"
+# First-boot partition resize
+install -m 0755 "${REPO_ROOT}/services/resize-rootfs.openrc" \
+    "${SYSROOT}/etc/init.d/resize-rootfs"
+chroot "${SYSROOT}" rc-update add resize-rootfs default || true
 
-cat > "${SYSROOT}/etc/systemd/system/resize-rootfs.service" <<'UNIT'
-[Unit]
-Description=Expand root partition to fill storage
-DefaultDependencies=no
-Before=local-fs-pre.target
-After=systemd-remount-fs.service
+# First-boot user creation
+install -m 0755 "${REPO_ROOT}/services/setup-user.openrc" \
+    "${SYSROOT}/etc/init.d/setup-user"
+chroot "${SYSROOT}" rc-update add setup-user default || true
 
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/resize-rootfs.sh
-RemainAfterExit=true
+# Enable standard services
+chroot "${SYSROOT}" rc-update add devfs sysinit || true
+chroot "${SYSROOT}" rc-update add dmesg sysinit || true
+chroot "${SYSROOT}" rc-update add mdev sysinit || true
+chroot "${SYSROOT}" rc-update add udev sysinit || true
+chroot "${SYSROOT}" rc-update add udev-trigger sysinit || true
+chroot "${SYSROOT}" rc-update add hwclock boot || true
+chroot "${SYSROOT}" rc-update add modules boot || true
+chroot "${SYSROOT}" rc-update add sysctl boot || true
+chroot "${SYSROOT}" rc-update add hostname boot || true
+chroot "${SYSROOT}" rc-update add bootmisc boot || true
+chroot "${SYSROOT}" rc-update add syslog boot || true
 
-[Install]
-WantedBy=multi-user.target
-UNIT
+chroot "${SYSROOT}" rc-update add sshd default || true
+chroot "${SYSROOT}" rc-update add chronyd default || true
+chroot "${SYSROOT}" rc-update add networkmanager default || true
+chroot "${SYSROOT}" rc-update add local default || true
 
-chroot "${SYSROOT}" systemctl enable resize-rootfs.service || true
+chroot "${SYSROOT}" rc-update add mount-ro shutdown || true
+chroot "${SYSROOT}" rc-update add killprocs shutdown || true
+chroot "${SYSROOT}" rc-update add savecache shutdown || true
 
-# ── eDP display check service ────────────────────────────────────────────────
-# Reboots if the eDP display is not connected on boot (cold boot workaround)
+# ── Audio setup ──────────────────────────────────────────────────────────────
 
-echo "==> Setting up eDP display check service..."
-install -m 0755 "${REPO_ROOT}/services/check-edp.sh" \
-    "${SYSROOT}/usr/local/sbin/check-edp.sh"
+echo "==> Installing audio setup script..."
+install -m 0755 "${REPO_ROOT}/services/teres-audio-setup.sh" \
+    "${SYSROOT}/usr/local/sbin/teres-audio-setup.sh"
 
-cat > "${SYSROOT}/etc/systemd/system/check-edp.service" <<'UNIT'
-[Unit]
-Description=Check eDP display and reboot if not connected
-After=multi-user.target
-DefaultDependencies=no
+# Run audio setup at boot via local.d
+mkdir -p "${SYSROOT}/etc/local.d"
+ln -sf /usr/local/sbin/teres-audio-setup.sh \
+    "${SYSROOT}/etc/local.d/teres-audio-setup.start"
 
-[Service]
-Type=oneshot
-RemainAfterExit=no
-ExecStart=/usr/local/bin/check-edp.sh
-StandardOutput=journal
-StandardError=journal
+# ── Battery status script ────────────────────────────────────────────────────
 
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-chroot "${SYSROOT}" systemctl enable check-edp.service || true
+echo "==> Installing battery status script..."
+install -m 0755 "${REPO_ROOT}/services/teres-battery.sh" \
+    "${SYSROOT}/usr/local/bin/teres-battery"
 
 # ── Embed install-to-nand.sh ────────────────────────────────────────────────
 
@@ -248,8 +298,6 @@ install -m 0755 "${SCRIPT_DIR}/install-to-nand.sh" \
     "${SYSROOT}/usr/local/sbin/install-to-nand.sh"
 
 # ── Copy U-Boot binary to /boot ─────────────────────────────────────────────
-# Stored on the SD card FAT /boot partition so install-to-nand.sh can find it
-# at /boot/u-boot-sunxi-with-spl.bin when running on the board.
 
 echo "==> Copying U-Boot to /boot..."
 UBOOT_BIN="${REPO_ROOT}/build/uboot/u-boot-sunxi-with-spl.bin"
@@ -259,10 +307,37 @@ else
     echo "    WARNING: ${UBOOT_BIN} not found — run scripts/build-uboot.sh first"
 fi
 
-# ── root password ───────────────────────────────────────────────────────────
+# ── Root password ───────────────────────────────────────────────────────────
 
 echo "==> Setting root password to 'root' (change after first boot!)"
 echo "root:root" | chroot "${SYSROOT}" chpasswd
+
+# ── sudo configuration ──────────────────────────────────────────────────────
+
+echo "==> Configuring sudo for wheel group..."
+mkdir -p "${SYSROOT}/etc/sudoers.d"
+echo "%wheel ALL=(ALL:ALL) ALL" > "${SYSROOT}/etc/sudoers.d/wheel"
+chmod 440 "${SYSROOT}/etc/sudoers.d/wheel"
+
+# ── DWM / X11 auto-start configuration ──────────────────────────────────────
+
+echo "==> Setting up DWM as default window manager..."
+cat > "${SYSROOT}/etc/profile.d/startx-login.sh" <<'XLOGIN'
+# Auto-start X11 with DWM on tty1 login (for the default user)
+if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    exec startx
+fi
+XLOGIN
+
+# Default .xinitrc for all users
+cat > "${SYSROOT}/etc/skel/.xinitrc" <<'XINITRC'
+#!/bin/sh
+# Set keyboard repeat rate
+xset r rate 200 30 &
+# Start DWM
+exec dwm
+XINITRC
+chmod 0644 "${SYSROOT}/etc/skel/.xinitrc"
 
 # ── WiFi pre-configuration ──────────────────────────────────────────────────
 
@@ -300,11 +375,14 @@ fi
 # ── Cleanup ─────────────────────────────────────────────────────────────────
 
 rm -f "${SYSROOT}/usr/bin/qemu-aarch64-static"
-chroot "${SYSROOT}" apt-get clean
-rm -rf "${SYSROOT}/var/lib/apt/lists/"*
+chroot "${SYSROOT}" apk cache clean 2>/dev/null || true
+rm -rf "${SYSROOT}/var/cache/apk/"*
 
 echo ""
-echo "==> Debian 13 (trixie) arm64 rootfs ready at: ${SYSROOT}"
-echo "    BOARD_HOSTNAME was: ${BOARD_HOSTNAME}"
-echo "    WIFI_SSID was: ${WIFI_SSID:-<not set>}"
+echo "==> Alpine Linux ${ALPINE_VERSION} arm64 rootfs ready at: ${SYSROOT}"
+echo "    BOARD_HOSTNAME: ${BOARD_HOSTNAME}"
+echo "    WIFI_SSID: ${WIFI_SSID:-<not set>}"
+echo "    Root credentials: root / root"
+echo "    User credentials: user / user (created on first boot)"
+echo "    Window manager: DWM (auto-starts on tty1)"
 echo "    Next step: sudo scripts/assemble-sd-image.sh"

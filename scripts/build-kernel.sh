@@ -15,7 +15,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-KERNEL_VERSION="6.6.85"
+KERNEL_VERSION="6.12.18"
 KRELEASE="6"
 KERNEL_URL="https://www.kernel.org/pub/linux/kernel/v${KRELEASE}.x/linux-${KERNEL_VERSION}.tar.xz"
 KERNEL_SHA256=""  # Set to SHA256 of the tarball to enable verification
