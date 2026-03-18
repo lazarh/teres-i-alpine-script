@@ -150,7 +150,8 @@ chroot "${SYSROOT}" apk add --no-cache \
 
 # Optional packages — install separately so failures don't abort the build
 chroot "${SYSROOT}" apk add --no-cache st    || true
-chroot "${SYSROOT}" apk add --no-cache light || true
+# `light` is not in Alpine 3.21 — use brightnessctl instead (same sysfs interface)
+chroot "${SYSROOT}" apk add --no-cache brightnessctl || true
 chroot "${SYSROOT}" apk add --no-cache font-noto || true
 
 # ── Kernel modules ──────────────────────────────────────────────────────────
@@ -274,6 +275,7 @@ install -m 0755 "${SCRIPT_DIR}/install-to-nand.sh" \
 # ── Copy U-Boot binary to /boot ─────────────────────────────────────────────
 
 echo "==> Copying U-Boot to /boot..."
+mkdir -p "${SYSROOT}/boot"
 UBOOT_BIN="${REPO_ROOT}/build/uboot/u-boot-sunxi-with-spl.bin"
 if [[ -f "${UBOOT_BIN}" ]]; then
     install -m 0644 "${UBOOT_BIN}" "${SYSROOT}/boot/u-boot-sunxi-with-spl.bin"

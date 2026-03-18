@@ -100,7 +100,7 @@ partition. Remove the SD card and reboot; the board will boot from eMMC.
 - **Display**: ANX6345 eDP bridge, innolux 11.6" panel, eDP cold-boot workaround service
 - **Audio**: ALSA with Allwinner A64 codec (headphone + line out), auto-configured on boot
 - **Battery**: AXP803 PMIC monitoring via `teres-battery` command
-- **Brightness**: `light` command for backlight control
+- **Brightness**: `brightnessctl` command for backlight control
 - **WiFi**: AP6212 (BCM43438) or RTL8723BS via NetworkManager
 - **Bluetooth**: BCM or RTL (SDIO/UART)
 
