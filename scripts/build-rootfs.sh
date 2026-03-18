@@ -85,6 +85,15 @@ fi
 # Copy QEMU binary so the chroot can execute AArch64 binaries on x86
 cp /usr/bin/qemu-aarch64-static "${SYSROOT}/usr/bin/"
 
+# Copy host DNS config so apk can resolve hostnames inside the chroot.
+# If the host uses systemd-resolved (127.0.0.53), use the upstream resolvers
+# instead — the stub address is not reachable from inside a chroot.
+if grep -q "^nameserver 127\." /etc/resolv.conf 2>/dev/null; then
+    cp /run/systemd/resolve/resolv.conf "${SYSROOT}/etc/resolv.conf"
+else
+    cp /etc/resolv.conf "${SYSROOT}/etc/resolv.conf"
+fi
+
 mount_chroot
 
 # ── Configure APK repositories ──────────────────────────────────────────────
@@ -375,6 +384,7 @@ fi
 # ── Cleanup ─────────────────────────────────────────────────────────────────
 
 rm -f "${SYSROOT}/usr/bin/qemu-aarch64-static"
+rm -f "${SYSROOT}/etc/resolv.conf"
 chroot "${SYSROOT}" apk cache clean 2>/dev/null || true
 rm -rf "${SYSROOT}/var/cache/apk/"*
 
