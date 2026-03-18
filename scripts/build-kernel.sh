@@ -38,7 +38,15 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 command -v "${CROSS_COMPILE}gcc" >/dev/null || die "${CROSS_COMPILE}gcc not found — run scripts/install-deps.sh"
 
-mkdir -p "${BUILD_DIR}" "${MODULES_DIR}" "${SOURCES_DIR}"
+mkdir -p "${BUILD_DIR}" "${SOURCES_DIR}"
+
+# If modules from a different kernel version exist, remove them to avoid stale modules
+STAMP="${BUILD_DIR}/.kernel-version"
+if [[ -f "${STAMP}" ]] && [[ "$(cat "${STAMP}")" != "${KERNEL_VERSION}" ]]; then
+    echo "==> Cleaning stale modules ($(cat "${STAMP}") → ${KERNEL_VERSION})..."
+    rm -rf "${MODULES_DIR}"
+fi
+mkdir -p "${MODULES_DIR}"
 
 # ── Download ───────────────────────────────────────────────────────────────
 
@@ -134,3 +142,6 @@ echo "    Image : ${BUILD_DIR}/Image"
 echo "    DTB   : ${BUILD_DIR}/sun50i-a64-teres-i.dtb"
 echo "    Modules: ${BUILD_DIR}/modules/"
 echo "    Next step: sudo scripts/build-rootfs.sh"
+
+# Write version stamp so build-rootfs.sh can verify the modules match
+echo "${KERNEL_VERSION}" > "${BUILD_DIR}/.kernel-version"

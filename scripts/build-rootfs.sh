@@ -40,6 +40,18 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 [[ -d "${KERNEL_BUILD}" ]] || die "build/kernel/ not found — run scripts/build-kernel.sh first"
 [[ -f "${KERNEL_BUILD}/Image" ]] || die "build/kernel/Image not found — run scripts/build-kernel.sh first"
 
+# Warn if the built kernel version stamp doesn't match the expected version
+if [[ -f "${KERNEL_BUILD}/.kernel-version" ]]; then
+    BUILT_KVER=$(cat "${KERNEL_BUILD}/.kernel-version")
+    EXPECTED_KVER="6.12.18"
+    if [[ "${BUILT_KVER}" != "${EXPECTED_KVER}" ]]; then
+        echo "WARNING: build/kernel/ contains kernel ${BUILT_KVER}, expected ${EXPECTED_KVER}."
+        echo "         Run scripts/build-kernel.sh to build the correct version."
+        echo "         Continuing with ${BUILT_KVER} — press Ctrl-C within 5s to abort."
+        sleep 5
+    fi
+fi
+
 mount_chroot() {
     mount -t proc  proc     "${SYSROOT}/proc"
     mount -t sysfs sysfs    "${SYSROOT}/sys"
