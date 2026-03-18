@@ -145,13 +145,11 @@ chroot "${SYSROOT}" apk add --no-cache \
 chroot "${SYSROOT}" apk add --no-cache \
     linux-firmware-brcm linux-firmware-rtlwifi
 
-# SSH
-chroot "${SYSROOT}" apk add --no-cache \
-    openssh openssh-server-pam openssh-openrc
+# SSH (openssh includes server, client, and OpenRC init script)
+chroot "${SYSROOT}" apk add --no-cache openssh
 
-# NTP
-chroot "${SYSROOT}" apk add --no-cache \
-    chrony chrony-openrc
+# NTP (chrony includes OpenRC init script)
+chroot "${SYSROOT}" apk add --no-cache chrony
 
 # Display / Xorg
 chroot "${SYSROOT}" apk add --no-cache \
@@ -159,37 +157,35 @@ chroot "${SYSROOT}" apk add --no-cache \
     mesa-dri-gallium mesa-gl \
     xf86-input-libinput
 
-# DWM / suckless
+# DWM / suckless — also install build deps in case dwm needs manual patching
 chroot "${SYSROOT}" apk add --no-cache \
-    dwm dmenu st-terminfo || {
-    echo "    NOTE: dwm/dmenu not in repo, installing build deps for manual build"
+    dwm dmenu build-base libx11-dev libxft-dev libxinerama-dev || {
+    echo "    NOTE: dwm not in repo, installing build deps only"
     chroot "${SYSROOT}" apk add --no-cache \
         build-base libx11-dev libxft-dev libxinerama-dev
 }
+# st terminal — try terminfo package, fall back silently
+chroot "${SYSROOT}" apk add --no-cache st || true
 
 # Fonts (needed for X11)
 chroot "${SYSROOT}" apk add --no-cache \
-    font-dejavu font-noto ttf-font-awesome
+    font-dejavu font-noto || chroot "${SYSROOT}" apk add --no-cache font-dejavu
 
-# Audio — ALSA
-chroot "${SYSROOT}" apk add --no-cache \
-    alsa-utils alsa-lib alsaconf || \
-    chroot "${SYSROOT}" apk add --no-cache alsa-utils alsa-lib
+# Audio — ALSA (alsaconf is not a separate package in Alpine 3.21)
+chroot "${SYSROOT}" apk add --no-cache alsa-utils alsa-lib
 
 # Brightness control
-chroot "${SYSROOT}" apk add --no-cache \
-    light || true
+chroot "${SYSROOT}" apk add --no-cache light || true
 
 # Battery/power monitoring (sysfs-based, script provided)
 # No extra package needed — uses /sys/class/power_supply/
 
 # Editors and utilities
-chroot "${SYSROOT}" apk add --no-cache \
-    vim less htop
+chroot "${SYSROOT}" apk add --no-cache vim less htop
 
-# Cloud/resize tools
-chroot "${SYSROOT}" apk add --no-cache \
-    cloud-utils-growpart || chroot "${SYSROOT}" apk add --no-cache growpart || true
+# Partition resize tool
+chroot "${SYSROOT}" apk add --no-cache growpart || \
+    chroot "${SYSROOT}" apk add --no-cache cloud-utils-growpart || true
 
 # ── Kernel modules ──────────────────────────────────────────────────────────
 
