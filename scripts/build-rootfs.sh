@@ -123,69 +123,35 @@ tmpfs           /tmp   tmpfs defaults,nosuid,nodev  0  0
 EOF
 
 # ── Install packages ────────────────────────────────────────────────────────
+# Consolidate into one apk add call to avoid fetching APKINDEX repeatedly.
 
 echo "==> Installing Alpine packages..."
 chroot "${SYSROOT}" apk update
 
-# Base system + OpenRC
 chroot "${SYSROOT}" apk add --no-cache \
     alpine-base openrc busybox-extras shadow sudo \
     eudev eudev-openrc \
     util-linux e2fsprogs dosfstools parted \
     rsync curl wget ca-certificates \
-    kmod \
-    iproute2 iputils iptables nftables
-
-# Networking — NetworkManager + WiFi
-chroot "${SYSROOT}" apk add --no-cache \
+    kmod iproute2 iputils iptables nftables \
     networkmanager networkmanager-wifi networkmanager-openrc \
-    wpa_supplicant iw
-
-# WiFi firmware
-chroot "${SYSROOT}" apk add --no-cache \
-    linux-firmware-brcm linux-firmware-rtlwifi
-
-# SSH (openssh includes server, client, and OpenRC init script)
-chroot "${SYSROOT}" apk add --no-cache openssh
-
-# NTP (chrony includes OpenRC init script)
-chroot "${SYSROOT}" apk add --no-cache chrony
-
-# Display / Xorg
-chroot "${SYSROOT}" apk add --no-cache \
+    wpa_supplicant iw \
+    linux-firmware-brcm linux-firmware-rtlwifi \
+    openssh chrony \
     xorg-server xf86-video-modesetting xinit xrandr xset setxkbmap \
-    mesa-dri-gallium mesa-gl \
-    xf86-input-libinput
+    mesa-dri-gallium mesa-gl xf86-input-libinput \
+    dwm dmenu \
+    build-base libx11-dev libxft-dev libxinerama-dev \
+    font-dejavu \
+    alsa-utils alsa-lib \
+    vim less htop \
+    tzdata \
+    cloud-utils-growpart
 
-# DWM / suckless — also install build deps in case dwm needs manual patching
-chroot "${SYSROOT}" apk add --no-cache \
-    dwm dmenu build-base libx11-dev libxft-dev libxinerama-dev || {
-    echo "    NOTE: dwm not in repo, installing build deps only"
-    chroot "${SYSROOT}" apk add --no-cache \
-        build-base libx11-dev libxft-dev libxinerama-dev
-}
-# st terminal — try terminfo package, fall back silently
-chroot "${SYSROOT}" apk add --no-cache st || true
-
-# Fonts (needed for X11)
-chroot "${SYSROOT}" apk add --no-cache \
-    font-dejavu font-noto || chroot "${SYSROOT}" apk add --no-cache font-dejavu
-
-# Audio — ALSA (alsaconf is not a separate package in Alpine 3.21)
-chroot "${SYSROOT}" apk add --no-cache alsa-utils alsa-lib
-
-# Brightness control
+# Optional packages — install separately so failures don't abort the build
+chroot "${SYSROOT}" apk add --no-cache st    || true
 chroot "${SYSROOT}" apk add --no-cache light || true
-
-# Battery/power monitoring (sysfs-based, script provided)
-# No extra package needed — uses /sys/class/power_supply/
-
-# Editors and utilities
-chroot "${SYSROOT}" apk add --no-cache vim less htop
-
-# Partition resize tool
-chroot "${SYSROOT}" apk add --no-cache growpart || \
-    chroot "${SYSROOT}" apk add --no-cache cloud-utils-growpart || true
+chroot "${SYSROOT}" apk add --no-cache font-noto || true
 
 # ── Kernel modules ──────────────────────────────────────────────────────────
 
@@ -234,7 +200,7 @@ fi
 
 # ── Timezone ────────────────────────────────────────────────────────────────
 
-chroot "${SYSROOT}" apk add --no-cache tzdata || true
+# tzdata was installed in the main apk add block above
 cp "${SYSROOT}/usr/share/zoneinfo/UTC" "${SYSROOT}/etc/localtime" || true
 echo "UTC" > "${SYSROOT}/etc/timezone"
 
@@ -282,6 +248,7 @@ chroot "${SYSROOT}" rc-update add savecache shutdown || true
 # ── Audio setup ──────────────────────────────────────────────────────────────
 
 echo "==> Installing audio setup script..."
+mkdir -p "${SYSROOT}/usr/local/sbin"
 install -m 0755 "${REPO_ROOT}/services/teres-audio-setup.sh" \
     "${SYSROOT}/usr/local/sbin/teres-audio-setup.sh"
 
@@ -293,12 +260,14 @@ ln -sf /usr/local/sbin/teres-audio-setup.sh \
 # ── Battery status script ────────────────────────────────────────────────────
 
 echo "==> Installing battery status script..."
+mkdir -p "${SYSROOT}/usr/local/bin"
 install -m 0755 "${REPO_ROOT}/services/teres-battery.sh" \
     "${SYSROOT}/usr/local/bin/teres-battery"
 
 # ── Embed install-to-nand.sh ────────────────────────────────────────────────
 
 echo "==> Embedding install-to-nand.sh..."
+mkdir -p "${SYSROOT}/usr/local/sbin"
 install -m 0755 "${SCRIPT_DIR}/install-to-nand.sh" \
     "${SYSROOT}/usr/local/sbin/install-to-nand.sh"
 
