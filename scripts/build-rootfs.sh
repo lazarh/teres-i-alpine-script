@@ -164,7 +164,17 @@ chroot "${SYSROOT}" apk add --no-cache st    || true
 chroot "${SYSROOT}" apk add --no-cache brightnessctl || true
 chroot "${SYSROOT}" apk add --no-cache font-noto || true
 
-# ── Kernel modules ──────────────────────────────────────────────────────────
+# ── Decompress .zst firmware files ──────────────────────────────────────────
+# Alpine ships firmware as .zst but the kernel needs CONFIG_FW_LOADER_COMPRESS_ZSTD
+# to load them. Decompress all .zst firmware to plain files so any kernel works.
+echo "==> Decompressing .zst firmware files..."
+find "${SYSROOT}/lib/firmware" -name "*.zst" | while read -r f; do
+    out="${f%.zst}"
+    [[ -f "$out" ]] && continue  # already decompressed
+    zstd -d "$f" -o "$out" --force -q 2>/dev/null || true
+done
+echo "    Firmware decompressed."
+
 
 echo "==> Installing kernel modules from ${MODULES_DIR}..."
 if [[ -d "${MODULES_DIR}/lib/modules" ]]; then
