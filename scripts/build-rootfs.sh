@@ -145,7 +145,7 @@ chroot "${SYSROOT}" apk add --no-cache \
     util-linux e2fsprogs dosfstools parted \
     rsync curl wget ca-certificates \
     kmod iproute2 iputils iptables nftables \
-    wpa_supplicant dhcpcd iw \
+    wpa_supplicant dhcpcd openresolv iw \
     linux-firmware-brcm linux-firmware-rtlwifi \
     openssh chrony \
     xorg-server xf86-video-modesetting xinit xrandr xset setxkbmap \
@@ -310,6 +310,13 @@ allowinterfaces wlan0 eth0
 background
 timeout 30
 DHCPCFG
+
+# Fallback resolv.conf — dhcpcd/openresolv will overwrite with router-supplied
+# DNS once a lease is obtained. These act as a safety net.
+cat > "${SYSROOT}/etc/resolv.conf" <<'RESOLV'
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+RESOLV
 
 # ── Audio setup ──────────────────────────────────────────────────────────────
 # Audio modules are NOT loaded at boot — loading the A64 codec during early
