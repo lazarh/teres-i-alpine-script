@@ -254,6 +254,13 @@ chroot "${SYSROOT}" rc-update add dbus default || true
 chroot "${SYSROOT}" rc-update add iwd default || true
 chroot "${SYSROOT}" rc-update add local default || true
 
+# D-Bus requires a machine-id to register service names (e.g. net.connman.iwd).
+# Generate one at build time; dbus will regenerate it on first real boot if needed.
+chroot "${SYSROOT}" dbus-uuidgen --ensure=/etc/machine-id 2>/dev/null || \
+    chroot "${SYSROOT}" dbus-uuidgen > "${SYSROOT}/etc/machine-id" || true
+mkdir -p "${SYSROOT}/var/lib/dbus"
+ln -sf /etc/machine-id "${SYSROOT}/var/lib/dbus/machine-id" 2>/dev/null || true
+
 chroot "${SYSROOT}" rc-update add mount-ro shutdown || true
 chroot "${SYSROOT}" rc-update add killprocs shutdown || true
 chroot "${SYSROOT}" rc-update add savecache shutdown || true
