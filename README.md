@@ -78,6 +78,30 @@ This partitions the internal eMMC (`/dev/mmcblk2`), writes U-Boot at the 8 KiB
 offset, copies boot files to a FAT32 partition, and copies the rootfs to an ext4
 partition. Remove the SD card and reboot; the board will boot from eMMC.
 
+## WiFi
+
+WiFi is managed by **iwd**. Use `iwctl` to connect:
+
+```bash
+# List available networks
+iwctl station wlan0 scan
+iwctl station wlan0 get-networks
+
+# Connect (enter passphrase when prompted)
+iwctl station wlan0 connect "MyNetwork"
+
+# Or connect with passphrase inline
+iwctl --passphrase "mypassword" station wlan0 connect "MyNetwork"
+```
+
+iwd handles DHCP automatically (`EnableNetworkConfiguration=true`).
+Known networks are saved in `/var/lib/iwd/` and reconnect automatically on next boot.
+
+To pre-configure WiFi before the first boot, set these when building:
+```bash
+WIFI_SSID="MyNetwork" WIFI_PASSWORD="mypassword" sudo scripts/build-rootfs.sh
+```
+
 ## Default credentials
 
 | | |
@@ -101,14 +125,14 @@ partition. Remove the SD card and reboot; the board will boot from eMMC.
 - **Audio**: ALSA with Allwinner A64 codec (headphone + line out), auto-configured on boot
 - **Battery**: AXP803 PMIC monitoring via `teres-battery` command
 - **Brightness**: `brightnessctl` command for backlight control
-- **WiFi**: AP6212 (BCM43438) or RTL8723BS via NetworkManager
+- **WiFi**: AP6212 (BCM43438) or RTL8723BS via iwd (`iwctl`)
 - **Bluetooth**: BCM or RTL (SDIO/UART)
 
 ### System services (OpenRC)
 - `check-edp` — reboots if eDP display not detected (cold boot workaround)
 - `resize-rootfs` — expands root partition on first boot
 - `setup-user` — creates `user` account with sudo on first boot
-- `networkmanager` — WiFi/network management
+- `iwd` — WiFi management (use `iwctl` to connect)
 - `sshd` — SSH server
 - `chronyd` — NTP time sync
 

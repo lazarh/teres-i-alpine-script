@@ -146,8 +146,7 @@ chroot "${SYSROOT}" apk add --no-cache \
     util-linux e2fsprogs dosfstools parted \
     rsync curl wget ca-certificates \
     kmod iproute2 iputils iptables nftables \
-    networkmanager networkmanager-wifi networkmanager-openrc \
-    wpa_supplicant iw \
+    iwd \
     linux-firmware-brcm linux-firmware-rtlwifi \
     openssh chrony \
     xorg-server xf86-video-modesetting xinit xrandr xset setxkbmap \
@@ -252,7 +251,7 @@ chroot "${SYSROOT}" rc-update add syslog boot || true
 
 chroot "${SYSROOT}" rc-update add sshd default || true
 chroot "${SYSROOT}" rc-update add chronyd default || true
-chroot "${SYSROOT}" rc-update add networkmanager default || true
+chroot "${SYSROOT}" rc-update add iwd default || true
 chroot "${SYSROOT}" rc-update add local default || true
 
 chroot "${SYSROOT}" rc-update add mount-ro shutdown || true
@@ -265,7 +264,7 @@ chroot "${SYSROOT}" rc-update add savecache shutdown || true
 cat > "${SYSROOT}/etc/init.d/rfkill-unblock" <<'OPENRC'
 #!/sbin/openrc-run
 description="Unblock all rfkill-managed devices (WiFi, Bluetooth)"
-depend() { after modules; before networkmanager; }
+depend() { after modules; before iwd; }
 start() {
     ebegin "Unblocking rfkill devices"
     rfkill unblock all 2>/dev/null || true
@@ -275,17 +274,20 @@ OPENRC
 chmod 0755 "${SYSROOT}/etc/init.d/rfkill-unblock"
 chroot "${SYSROOT}" rc-update add rfkill-unblock default || true
 
-# ── NetworkManager — WiFi backend config ────────────────────────────────────
+# ── iwd — WiFi daemon config ─────────────────────────────────────────────────
+# iwd handles WiFi directly (no wpa_supplicant). Use `iwctl` to connect:
+#   iwctl station wlan0 scan
+#   iwctl station wlan0 get-networks
+#   iwctl station wlan0 connect "SSID"
 
-mkdir -p "${SYSROOT}/etc/NetworkManager/conf.d"
-cat > "${SYSROOT}/etc/NetworkManager/conf.d/wifi.conf" <<'NMCONF'
-[device]
-wifi.backend=wpa_supplicant
+mkdir -p "${SYSROOT}/etc/iwd"
+cat > "${SYSROOT}/etc/iwd/main.conf" <<'IWDCONF'
+[General]
+EnableNetworkConfiguration=true
 
-[connectivity]
-# Disable NM connectivity check (no internet assumed on first boot)
-enabled=false
-NMCONF
+[Network]
+NameResolvingService=none
+IWDCONF
 
 # ── Audio setup ──────────────────────────────────────────────────────────────
 # Audio modules are NOT loaded at boot — loading the A64 codec during early
@@ -359,33 +361,17 @@ XINITRC
 chmod 0644 "${SYSROOT}/etc/skel/.xinitrc"
 
 # ── WiFi pre-configuration ──────────────────────────────────────────────────
+# iwd stores pre-configured networks as /var/lib/iwd/<SSID>.psk
 
 if [[ -n "${WIFI_SSID}" && -n "${WIFI_PASSWORD}" ]]; then
     echo "==> Pre-configuring WiFi for SSID: ${WIFI_SSID}"
-    NM_DIR="${SYSROOT}/etc/NetworkManager/system-connections"
-    mkdir -p "${NM_DIR}"
-    cat > "${NM_DIR}/wifi-preconfigured.nmconnection" <<EOF
-[connection]
-id=${WIFI_SSID}
-type=wifi
-autoconnect=true
-
-[wifi]
-ssid=${WIFI_SSID}
-mode=infrastructure
-
-[wifi-security]
-key-mgmt=wpa-psk
-psk=${WIFI_PASSWORD}
-
-[ipv4]
-method=auto
-
-[ipv6]
-addr-gen-mode=default
-method=auto
+    IWD_DIR="${SYSROOT}/var/lib/iwd"
+    mkdir -p "${IWD_DIR}"
+    cat > "${IWD_DIR}/${WIFI_SSID}.psk" <<EOF
+[Security]
+Passphrase=${WIFI_PASSWORD}
 EOF
-    chmod 600 "${NM_DIR}/wifi-preconfigured.nmconnection"
+    chmod 600 "${IWD_DIR}/${WIFI_SSID}.psk"
     echo "    WiFi profile written (SSID: ${WIFI_SSID})."
 elif [[ -n "${WIFI_SSID}" || -n "${WIFI_PASSWORD}" ]]; then
     echo "    WARNING: Both WIFI_SSID and WIFI_PASSWORD must be set to pre-configure WiFi. Skipping."
