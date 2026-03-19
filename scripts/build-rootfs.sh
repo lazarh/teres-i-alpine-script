@@ -142,7 +142,7 @@ chroot "${SYSROOT}" apk update
 chroot "${SYSROOT}" apk add --no-cache \
     alpine-base openrc busybox-extras bash shadow sudo \
     eudev eudev-openrc \
-    util-linux e2fsprogs dosfstools parted \
+    util-linux e2fsprogs e2fsprogs-extra dosfstools parted \
     rsync curl wget ca-certificates \
     kmod iproute2 iputils iptables nftables \
     wpa_supplicant dhcpcd openresolv iw \
