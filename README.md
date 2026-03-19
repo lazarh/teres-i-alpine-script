@@ -99,7 +99,7 @@ Known networks are saved in `/var/lib/iwd/` and reconnect automatically on next 
 
 To pre-configure WiFi before the first boot, set these when building:
 ```bash
-WIFI_SSID="MyNetwork" WIFI_PASSWORD="mypassword" sudo scripts/build-rootfs.sh
+sudo WIFI_SSID="MyNetwork" WIFI_PASSWORD="mypassword" scripts/build-rootfs.sh
 ```
 
 ## Default credentials

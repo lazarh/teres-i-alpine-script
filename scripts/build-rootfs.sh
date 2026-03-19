@@ -7,10 +7,9 @@
 #   1. scripts/install-deps.sh    (installs qemu-user-static, etc.)
 #   2. scripts/build-kernel.sh    (produces build/kernel/modules/ and Image)
 #
-# Environment variables:
-#   BOARD_HOSTNAME=myteres — set board hostname (default: teres-i)
-#   WIFI_SSID=MyNetwork — pre-configure WiFi (requires WIFI_PASSWORD)
-#   WIFI_PASSWORD=secret — WPA2 passphrase for WIFI_SSID
+# Environment variables (must be passed AFTER sudo, not before):
+#   sudo BOARD_HOSTNAME=myteres scripts/build-rootfs.sh
+#   sudo WIFI_SSID=MyNetwork WIFI_PASSWORD=secret scripts/build-rootfs.sh
 #
 # Produces: alpine-rootfs/
 # Consumed by: scripts/assemble-sd-image.sh
