@@ -126,6 +126,7 @@ sudo WIFI_SSID="MyNetwork" WIFI_PASSWORD="mypassword" scripts/build-rootfs.sh
 - **DWM** (dynamic window manager) — auto-starts on tty1 login
 - **dmenu** — application launcher (Alt+P)
 - **st** / terminal — suckless terminal
+- **Firefox ESR** — stable browser (launch via dmenu or `firefox-esr &`)
 - **Xorg** with modesetting driver + Lima (Mali-400 GPU)
 
 ### Hardware support

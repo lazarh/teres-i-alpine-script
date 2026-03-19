@@ -163,6 +163,8 @@ chroot "${SYSROOT}" apk add --no-cache st    || true
 # `light` is not in Alpine 3.21 — use brightnessctl instead (same sysfs interface)
 chroot "${SYSROOT}" apk add --no-cache brightnessctl || true
 chroot "${SYSROOT}" apk add --no-cache font-noto || true
+# Firefox ESR — stable branch, security-only updates between yearly releases
+chroot "${SYSROOT}" apk add --no-cache firefox-esr || true
 
 # ── Decompress .zst firmware files ──────────────────────────────────────────
 # Alpine ships firmware as .zst but the kernel needs CONFIG_FW_LOADER_COMPRESS_ZSTD
