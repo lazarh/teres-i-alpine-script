@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # install-to-nand.sh — Write the running SD card OS to the internal eMMC.
 #
 # Run this from the booted SD card image as root on the Teres-I.
@@ -12,7 +12,7 @@
 #
 # After install: remove the SD card and reboot to start from eMMC.
 
-set -euo pipefail
+set -eu
 
 UBOOT_BIN=/boot/u-boot-sunxi-with-spl.bin
 EMMC_DEV=/dev/mmcblk2
@@ -32,14 +32,14 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 # ── Preflight checks ────────────────────────────────────────────────────────
 
-[[ $EUID -eq 0 ]] || die "Must be run as root"
+[ "$(id -u)" -eq 0 ] || die "Must be run as root"
 
 for cmd in parted mkfs.vfat mkfs.ext4 rsync; do
     command -v "${cmd}" >/dev/null || die "${cmd} not found"
 done
 
-[[ -f "${UBOOT_BIN}" ]] || die "${UBOOT_BIN} not found — was the SD image built correctly?"
-[[ -b "${EMMC_DEV}" ]]  || die "${EMMC_DEV} not found — are you running on Teres-I hardware?"
+[ -f "${UBOOT_BIN}" ] || die "${UBOOT_BIN} not found — was the SD image built correctly?"
+[ -b "${EMMC_DEV}" ]  || die "${EMMC_DEV} not found — are you running on Teres-I hardware?"
 
 # Safety: refuse if eMMC is the current root device
 ROOT_DEV=$(findmnt -n -o SOURCE /)
@@ -53,8 +53,10 @@ echo "==> Detected eMMC: ${EMMC_DEV} (${EMMC_SIZE_GB} GB)"
 
 # Warn if eMMC already has partitions
 if lsblk -n -o NAME "${EMMC_DEV}" 2>/dev/null | grep -q "mmcblk2p"; then
-    read -rp "eMMC already has partitions. Overwrite? [y/N] " answer
-    [[ "${answer,,}" == "y" ]] || { echo "Aborted."; exit 0; }
+    printf "eMMC already has partitions. Overwrite? [y/N] "
+    read -r answer
+    answer=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
+    [ "$answer" = "y" ] || { echo "Aborted."; exit 0; }
 fi
 
 echo ""
@@ -108,7 +110,7 @@ rm -f "${WORK_DIR}/boot/u-boot-sunxi-with-spl.bin"
 # Generate an eMMC-specific boot.scr based on boot/boot.cmd
 # (mmc 1:1 for eMMC, root on mmcblk2p2)
 echo "==> Generating eMMC boot script..."
-EMMC_BOOT_CMD=$(mktemp /tmp/emmc-boot.XXXXXX.cmd)
+EMMC_BOOT_CMD=$(mktemp)
 cat > "${EMMC_BOOT_CMD}" <<'BOOTCMD'
 # Boot from eMMC on Olimex Teres-I.
 #
@@ -147,7 +149,7 @@ mkdir -p "${WORK_DIR}/root"/{proc,sys,dev,run,tmp,boot}
 chmod 1777 "${WORK_DIR}/root/tmp"
 
 # Copy kernel modules
-if [[ -d /lib/modules ]]; then
+if [ -d /lib/modules ]; then
     rsync -aAX /lib/modules/ "${WORK_DIR}/root/lib/modules/"
 fi
 

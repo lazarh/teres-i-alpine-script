@@ -9,19 +9,22 @@ depend() {
 }
 
 start() {
+    local flag="/etc/.rootfs-resized"
+    [ -f "$flag" ] && { einfo "Already resized, skipping."; eend 0; return; }
+
     ebegin "Expanding root partition"
 
     local root_part root_dev part_num
-
     root_part=$(findmnt -n -o SOURCE /)
     root_dev=$(lsblk -n -o PKNAME "${root_part}" | head -1)
     part_num=$(cat "/sys/class/block/$(basename "${root_part}")/partition")
 
-    einfo "Expanding /dev/${root_dev} partition ${part_num}..."
+    einfo "Resizing /dev/${root_dev} partition ${part_num}..."
     growpart "/dev/${root_dev}" "${part_num}" || true
-    resize2fs "${root_part}" || true
+    # -f forces resize even without prior e2fsck (safe for online root resize)
+    resize2fs -f "${root_part}"
 
-    einfo "Disabling resize-rootfs service (one-shot)"
-    rc-update del resize-rootfs default
+    touch "$flag"
+    rc-update del resize-rootfs default 2>/dev/null || true
     eend 0
 }

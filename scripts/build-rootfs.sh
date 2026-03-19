@@ -140,7 +140,7 @@ echo "==> Installing Alpine packages..."
 chroot "${SYSROOT}" apk update
 
 chroot "${SYSROOT}" apk add --no-cache \
-    alpine-base openrc busybox-extras shadow sudo \
+    alpine-base openrc busybox-extras bash shadow sudo \
     eudev eudev-openrc \
     util-linux e2fsprogs dosfstools parted \
     rsync curl wget ca-certificates \
