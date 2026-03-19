@@ -145,7 +145,7 @@ chroot "${SYSROOT}" apk add --no-cache \
     util-linux e2fsprogs dosfstools parted \
     rsync curl wget ca-certificates \
     kmod iproute2 iputils iptables nftables \
-    wpa_supplicant dhcpcd \
+    wpa_supplicant dhcpcd iw \
     linux-firmware-brcm linux-firmware-rtlwifi \
     openssh chrony \
     xorg-server xf86-video-modesetting xinit xrandr xset setxkbmap \
