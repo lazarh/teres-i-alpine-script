@@ -145,7 +145,7 @@ chroot "${SYSROOT}" apk add --no-cache \
     util-linux e2fsprogs dosfstools parted \
     rsync curl wget ca-certificates \
     kmod iproute2 iputils iptables nftables \
-    iwd \
+    wpa_supplicant dhcpcd \
     linux-firmware-brcm linux-firmware-rtlwifi \
     openssh chrony \
     xorg-server xf86-video-modesetting xinit xrandr xset setxkbmap \
@@ -250,16 +250,9 @@ chroot "${SYSROOT}" rc-update add syslog boot || true
 
 chroot "${SYSROOT}" rc-update add sshd default || true
 chroot "${SYSROOT}" rc-update add chronyd default || true
-chroot "${SYSROOT}" rc-update add dbus default || true
-chroot "${SYSROOT}" rc-update add iwd default || true
+chroot "${SYSROOT}" rc-update add wpa_supplicant boot || true
+chroot "${SYSROOT}" rc-update add dhcpcd default || true
 chroot "${SYSROOT}" rc-update add local default || true
-
-# D-Bus requires a machine-id to register service names (e.g. net.connman.iwd).
-# Generate one at build time; dbus will regenerate it on first real boot if needed.
-chroot "${SYSROOT}" dbus-uuidgen --ensure=/etc/machine-id 2>/dev/null || \
-    chroot "${SYSROOT}" dbus-uuidgen > "${SYSROOT}/etc/machine-id" || true
-mkdir -p "${SYSROOT}/var/lib/dbus"
-ln -sf /etc/machine-id "${SYSROOT}/var/lib/dbus/machine-id" 2>/dev/null || true
 
 chroot "${SYSROOT}" rc-update add mount-ro shutdown || true
 chroot "${SYSROOT}" rc-update add killprocs shutdown || true
@@ -271,7 +264,7 @@ chroot "${SYSROOT}" rc-update add savecache shutdown || true
 cat > "${SYSROOT}/etc/init.d/rfkill-unblock" <<'OPENRC'
 #!/sbin/openrc-run
 description="Unblock all rfkill-managed devices (WiFi, Bluetooth)"
-depend() { after modules; before iwd; }
+depend() { after modules; before wpa_supplicant; }
 start() {
     ebegin "Unblocking rfkill devices"
     rfkill unblock all 2>/dev/null || true
@@ -281,20 +274,32 @@ OPENRC
 chmod 0755 "${SYSROOT}/etc/init.d/rfkill-unblock"
 chroot "${SYSROOT}" rc-update add rfkill-unblock default || true
 
-# ── iwd — WiFi daemon config ─────────────────────────────────────────────────
-# iwd handles WiFi directly (no wpa_supplicant). Use `iwctl` to connect:
-#   iwctl station wlan0 scan
-#   iwctl station wlan0 get-networks
-#   iwctl station wlan0 connect "SSID"
+# ── wpa_supplicant — WiFi config ─────────────────────────────────────────────
+# Alpine's wpa_supplicant service reads /etc/wpa_supplicant/wpa_supplicant.conf
+# Connect on device: wpa_cli -i wlan0
+#   > scan
+#   > scan_results
+#   > add_network / set_network 0 ssid "..." / set_network 0 psk "..." / enable_network 0
 
-mkdir -p "${SYSROOT}/etc/iwd"
-cat > "${SYSROOT}/etc/iwd/main.conf" <<'IWDCONF'
-[General]
-EnableNetworkConfiguration=true
+mkdir -p "${SYSROOT}/etc/wpa_supplicant"
+cat > "${SYSROOT}/etc/wpa_supplicant/wpa_supplicant.conf" <<'WPACFG'
+ctrl_interface=/var/run/wpa_supplicant
+ctrl_interface_group=0
+update_config=1
+WPACFG
 
-[Network]
-NameResolvingService=none
-IWDCONF
+# Point wpa_supplicant service at wlan0
+mkdir -p "${SYSROOT}/etc/conf.d"
+cat > "${SYSROOT}/etc/conf.d/wpa_supplicant" <<'WPASVC'
+wpa_supplicant_args="-i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf"
+WPASVC
+
+# dhcpcd: only manage wlan0 and eth0, skip lo and other interfaces
+cat > "${SYSROOT}/etc/dhcpcd.conf" <<'DHCPCFG'
+allowinterfaces wlan0 eth0
+background
+timeout 30
+DHCPCFG
 
 # ── Audio setup ──────────────────────────────────────────────────────────────
 # Audio modules are NOT loaded at boot — loading the A64 codec during early
@@ -368,17 +373,13 @@ XINITRC
 chmod 0644 "${SYSROOT}/etc/skel/.xinitrc"
 
 # ── WiFi pre-configuration ──────────────────────────────────────────────────
-# iwd stores pre-configured networks as /var/lib/iwd/<SSID>.psk
+# Appended to /etc/wpa_supplicant/wpa_supplicant.conf as a network block.
 
 if [[ -n "${WIFI_SSID}" && -n "${WIFI_PASSWORD}" ]]; then
     echo "==> Pre-configuring WiFi for SSID: ${WIFI_SSID}"
-    IWD_DIR="${SYSROOT}/var/lib/iwd"
-    mkdir -p "${IWD_DIR}"
-    cat > "${IWD_DIR}/${WIFI_SSID}.psk" <<EOF
-[Security]
-Passphrase=${WIFI_PASSWORD}
-EOF
-    chmod 600 "${IWD_DIR}/${WIFI_SSID}.psk"
+    # Use wpa_passphrase to generate a hashed PSK network block
+    chroot "${SYSROOT}" wpa_passphrase "${WIFI_SSID}" "${WIFI_PASSWORD}" \
+        >> "${SYSROOT}/etc/wpa_supplicant/wpa_supplicant.conf"
     echo "    WiFi profile written (SSID: ${WIFI_SSID})."
 elif [[ -n "${WIFI_SSID}" || -n "${WIFI_PASSWORD}" ]]; then
     echo "    WARNING: Both WIFI_SSID and WIFI_PASSWORD must be set to pre-configure WiFi. Skipping."

@@ -80,22 +80,30 @@ partition. Remove the SD card and reboot; the board will boot from eMMC.
 
 ## WiFi
 
-WiFi is managed by **iwd**. Use `iwctl` to connect:
+WiFi is managed by **wpa_supplicant** + **dhcpcd**. No D-Bus required.
 
+To connect to a network on the device:
 ```bash
-# List available networks
-iwctl station wlan0 scan
-iwctl station wlan0 get-networks
+# Add network to wpa_supplicant config
+wpa_passphrase "MyNetwork" "mypassword" >> /etc/wpa_supplicant/wpa_supplicant.conf
 
-# Connect (enter passphrase when prompted)
-iwctl station wlan0 connect "MyNetwork"
-
-# Or connect with passphrase inline
-iwctl --passphrase "mypassword" station wlan0 connect "MyNetwork"
+# Apply without rebooting
+wpa_cli -i wlan0 reconfigure
 ```
 
-iwd handles DHCP automatically (`EnableNetworkConfiguration=true`).
-Known networks are saved in `/var/lib/iwd/` and reconnect automatically on next boot.
+Or interactively:
+```bash
+wpa_cli -i wlan0
+> scan
+> scan_results
+> add_network
+> set_network 0 ssid "MyNetwork"
+> set_network 0 psk "mypassword"
+> enable_network 0
+> save_config
+```
+
+dhcpcd picks up the IP automatically once wpa_supplicant associates.
 
 To pre-configure WiFi before the first boot, set these when building:
 ```bash
@@ -125,14 +133,15 @@ sudo WIFI_SSID="MyNetwork" WIFI_PASSWORD="mypassword" scripts/build-rootfs.sh
 - **Audio**: ALSA with Allwinner A64 codec (headphone + line out), auto-configured on boot
 - **Battery**: AXP803 PMIC monitoring via `teres-battery` command
 - **Brightness**: `brightnessctl` command for backlight control
-- **WiFi**: AP6212 (BCM43438) or RTL8723BS via iwd (`iwctl`)
+- **WiFi**: AP6212 (BCM43438) or RTL8723BS via wpa_supplicant + dhcpcd
 - **Bluetooth**: BCM or RTL (SDIO/UART)
 
 ### System services (OpenRC)
 - `check-edp` — reboots if eDP display not detected (cold boot workaround)
 - `resize-rootfs` — expands root partition on first boot
 - `setup-user` — creates `user` account with sudo on first boot
-- `iwd` — WiFi management (use `iwctl` to connect)
+- `wpa_supplicant` — WiFi authentication
+- `dhcpcd` — DHCP client (auto-assigns IP after WiFi connects)
 - `sshd` — SSH server
 - `chronyd` — NTP time sync
 
