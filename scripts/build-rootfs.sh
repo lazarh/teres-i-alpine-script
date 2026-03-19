@@ -184,6 +184,7 @@ fi
 # ── WiFi firmware ───────────────────────────────────────────────────────────
 # Teres-I uses AP6212 (BCM43438) or RTL8723BS depending on board revision.
 # Load brcmfmac and rtl8723bs at boot so whichever chip is present is found.
+# Audio modules are intentionally excluded — see audio setup section below.
 
 mkdir -p "${SYSROOT}/etc/modules-load.d"
 cat > "${SYSROOT}/etc/modules-load.d/teres-wifi.conf" <<EOF
@@ -258,17 +259,45 @@ chroot "${SYSROOT}" rc-update add mount-ro shutdown || true
 chroot "${SYSROOT}" rc-update add killprocs shutdown || true
 chroot "${SYSROOT}" rc-update add savecache shutdown || true
 
+# ── rfkill unblock — enable WiFi/BT hardware switch at boot ─────────────────
+# brcmfmac and rtl8723bs may come up rfkill-blocked; unblock all at boot.
+
+cat > "${SYSROOT}/etc/init.d/rfkill-unblock" <<'OPENRC'
+#!/sbin/openrc-run
+description="Unblock all rfkill-managed devices (WiFi, Bluetooth)"
+depend() { after modules; before networkmanager; }
+start() {
+    ebegin "Unblocking rfkill devices"
+    rfkill unblock all 2>/dev/null || true
+    eend 0
+}
+OPENRC
+chmod 0755 "${SYSROOT}/etc/init.d/rfkill-unblock"
+chroot "${SYSROOT}" rc-update add rfkill-unblock default || true
+
+# ── NetworkManager — WiFi backend config ────────────────────────────────────
+
+mkdir -p "${SYSROOT}/etc/NetworkManager/conf.d"
+cat > "${SYSROOT}/etc/NetworkManager/conf.d/wifi.conf" <<'NMCONF'
+[device]
+wifi.backend=wpa_supplicant
+
+[connectivity]
+# Disable NM connectivity check (no internet assumed on first boot)
+enabled=false
+NMCONF
+
 # ── Audio setup ──────────────────────────────────────────────────────────────
+# Audio modules are NOT loaded at boot — loading the A64 codec during early
+# boot disrupts the debug serial UART when using an audio-cable serial adapter.
+# Run teres-audio-setup manually after login, or it will be called by startx.
 
 echo "==> Installing audio setup script..."
 mkdir -p "${SYSROOT}/usr/local/sbin"
 install -m 0755 "${REPO_ROOT}/services/teres-audio-setup.sh" \
     "${SYSROOT}/usr/local/sbin/teres-audio-setup.sh"
 
-# Run audio setup at boot via local.d
-mkdir -p "${SYSROOT}/etc/local.d"
-ln -sf /usr/local/sbin/teres-audio-setup.sh \
-    "${SYSROOT}/etc/local.d/teres-audio-setup.start"
+# Do NOT symlink into local.d — audio is initialized on-demand, not at boot
 
 # ── Battery status script ────────────────────────────────────────────────────
 
@@ -320,6 +349,8 @@ XLOGIN
 # Default .xinitrc for all users
 cat > "${SYSROOT}/etc/skel/.xinitrc" <<'XINITRC'
 #!/bin/sh
+# Initialize audio (deferred from boot to avoid serial UART disruption)
+/usr/local/sbin/teres-audio-setup.sh &
 # Set keyboard repeat rate
 xset r rate 200 30 &
 # Start DWM

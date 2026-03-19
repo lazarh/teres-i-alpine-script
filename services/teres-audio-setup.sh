@@ -3,6 +3,14 @@
 #
 # The A64 has an internal audio codec (sun8i-codec) with analog output.
 # This script loads the necessary modules and sets reasonable default levels.
+#
+# NOTE: This script is intentionally NOT run at boot to avoid disrupting the
+# debug serial UART when using an audio-cable serial adapter. Call it manually
+# after login or let startx invoke it via .xinitrc.
+#
+# Usage:
+#   teres-audio-setup        (manual)
+#   startx                   (invoked from .xinitrc automatically)
 
 # Load audio modules
 modprobe snd_soc_sunxi 2>/dev/null || true
