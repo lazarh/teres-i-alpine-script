@@ -250,6 +250,7 @@ chroot "${SYSROOT}" rc-update add syslog boot || true
 
 chroot "${SYSROOT}" rc-update add sshd default || true
 chroot "${SYSROOT}" rc-update add chronyd default || true
+chroot "${SYSROOT}" rc-update add dbus default || true
 chroot "${SYSROOT}" rc-update add iwd default || true
 chroot "${SYSROOT}" rc-update add local default || true
 
