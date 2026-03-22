@@ -2,6 +2,8 @@
 
 Build scripts for [Olimex Teres-I](https://github.com/OLIMEX/DIY-LAPTOP) — a DIY AArch64 laptop based on the Allwinner A64 SoC — producing a minimal Alpine Linux image with DWM as the window manager.
 
+![Teres-I running Alpine Linux with DWM](screenshot.png)
+
 Builds everything from source: ARM Trusted Firmware, U-Boot, Linux kernel, and an Alpine Linux arm64 rootfs. No Yocto, no binary blobs beyond firmware files.
 
 ---
