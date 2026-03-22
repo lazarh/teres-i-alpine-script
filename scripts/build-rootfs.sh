@@ -206,15 +206,7 @@ EOF
 echo "brcmfmac"  >> "${SYSROOT}/etc/modules"
 echo "rtl8723bs" >> "${SYSROOT}/etc/modules"
 
-# ── Battery / PMIC modules ───────────────────────────────────────────────────
-# axp20x MFD is built-in (=y) but battery/charger sub-drivers are modules (=m).
-# They must be loaded for /sys/class/power_supply/axp20x-battery to appear.
-cat > "${SYSROOT}/etc/modules-load.d/teres-power.conf" <<EOF
-axp20x_battery
-axp20x_charger
-EOF
-echo "axp20x_battery" >> "${SYSROOT}/etc/modules"
-echo "axp20x_charger" >> "${SYSROOT}/etc/modules"
+# Note: axp20x_battery and axp20x_charger are now built-in (=y), no modprobe needed.
 
 # ── SSH — allow root login ──────────────────────────────────────────────────
 
