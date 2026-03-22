@@ -1,93 +1,145 @@
-# Teres-I — Alpine Linux + DWM Build System
+# teres-i-alpine-script
 
-Build ARM Trusted Firmware, U-Boot, Linux kernel, and an Alpine Linux arm64
-root filesystem with DWM (suckless window manager) for the
-[Olimex Teres-I](https://github.com/OLIMEX/DIY-LAPTOP) DIY laptop
-(Allwinner A64 / sun50i-a64, ARM Cortex-A53 AArch64).
+Build scripts for [Olimex Teres-I](https://github.com/OLIMEX/DIY-LAPTOP) — a DIY AArch64 laptop based on the Allwinner A64 SoC — producing a minimal Alpine Linux image with DWM as the window manager.
 
-No Yocto required — everything is built via direct cross-compilation and
-Alpine minirootfs bootstrap.
+Builds everything from source: ARM Trusted Firmware, U-Boot, Linux kernel, and an Alpine Linux arm64 rootfs. No Yocto, no binary blobs beyond firmware files.
 
-## Quick Start
+---
 
-### 1. Install build dependencies (once, as root)
+## Hardware
+
+| Component | Details |
+|---|---|
+| SoC | Allwinner A64 (ARM Cortex-A53, 4-core, AArch64) |
+| RAM | 2 GiB LPDDR3 |
+| Display | 11.6" 1366×768 IPS eDP panel via ANX6345 bridge |
+| Storage | Internal eMMC (8/16 GiB) + microSD slot |
+| WiFi | AP6212 (BCM43438, `brcmfmac`) or RTL8723BS (`rtl8723bs`) depending on board revision |
+| Bluetooth | BCM or RTL (SDIO/UART, same chip as WiFi) |
+| Audio | Allwinner A64 internal codec — headphone jack + analog output |
+| Battery | AXP803 PMIC with AXP20X battery/charger kernel drivers |
+| Camera | CSI camera connector (optional) |
+| USB | 2× USB-A (EHCI/OHCI) |
+| Serial | 3.5mm audio jack debug UART at `ttyS0 115200` |
+
+---
+
+## What gets built
+
+| Component | Version / Details |
+|---|---|
+| ARM Trusted Firmware | v2.10.0, `sun50i_a64` platform |
+| U-Boot | 2024.01, `teres_i_defconfig` |
+| Kernel | 6.12.18 LTS, `arm64 defconfig` + `configs/kernel/teres-i.config` |
+| Alpine Linux | 3.21, arm64 minirootfs bootstrap |
+| Init system | OpenRC |
+| Window manager | DWM (suckless) |
+| Browser | Firefox ESR |
+
+---
+
+## Prerequisites
+
+An x86-64 build host running Debian or Ubuntu with:
+- `aarch64-linux-gnu-gcc` cross toolchain
+- `qemu-user-static` (for chroot package install)
+- `binfmt_misc` support
+
+Install everything needed:
 ```bash
 sudo scripts/install-deps.sh
 ```
 
-### 2. Build ARM Trusted Firmware + U-Boot
+---
+
+## Building
+
+Run these steps in order:
+
+### 1. Build U-Boot
 ```bash
 scripts/build-uboot.sh
 ```
-Downloads and compiles TF-A BL31 for `sun50i_a64`, then builds U-Boot with
-`teres_i_defconfig`.  Produces:
-- `build/uboot/u-boot-sunxi-with-spl.bin`
-- `build/uboot/boot.scr`
+Downloads ARM Trusted Firmware and U-Boot, compiles both, produces:
+- `build/uboot/u-boot-sunxi-with-spl.bin` — combined SPL + TF-A BL31 + U-Boot
+- `build/uboot/boot.scr` — U-Boot boot script
 
-### 3. Build the kernel
+### 2. Build the kernel
 ```bash
 scripts/build-kernel.sh
 ```
 Produces:
-- `build/kernel/Image`
-- `build/kernel/sun50i-a64-teres-i.dtb`
-- `build/kernel/modules/`
+- `build/kernel/Image` — uncompressed AArch64 kernel
+- `build/kernel/sun50i-a64-teres-i.dtb` — device tree
+- `build/kernel/modules/` — kernel modules
 
-### 4. Build the Alpine rootfs (as root)
+### 3. Build the Alpine rootfs
 ```bash
 sudo scripts/build-rootfs.sh
 ```
-Produces `alpine-rootfs/`.
+Bootstraps Alpine 3.21 arm64 minirootfs, installs packages via `apk`, configures services, and installs kernel modules. Produces `alpine-rootfs/`.
 
-To pre-configure the hostname or WiFi:
+Optional environment variables (must be set **after** `sudo`):
 ```bash
-# Set hostname at image build time (defaults to 'teres-i')
+# Customize hostname (default: teres-i)
 sudo BOARD_HOSTNAME="mylaptop" scripts/build-rootfs.sh
 
-# Pre-configure WiFi (requires WIFI_PASSWORD)
-sudo WIFI_SSID="MyNetwork" WIFI_PASSWORD="secret" scripts/build-rootfs.sh
+# Pre-configure WiFi so it connects on first boot
+sudo WIFI_SSID="MyNetwork" WIFI_PASSWORD="mypassword" scripts/build-rootfs.sh
 ```
 
-### 5. Assemble the SD card image (as root)
+> **Note:** Variables placed *before* `sudo` are stripped by sudo's environment sanitization.
+
+### 4. Assemble the SD card image
 ```bash
-# Default output image under repo root
 sudo scripts/assemble-sd-image.sh
-
-# Or specify an explicit output image path:
-sudo scripts/assemble-sd-image.sh /path/to/output.img
 ```
-Produces `teres-i-alpine.img.gz` (and `.bmap`).
+Produces:
+- `teres-i-alpine.img.gz` — compressed flashable image
+- `teres-i-alpine.img.gz.bmap` — bmaptool sparse map (when bmaptool is available)
 
-### 6. Flash to SD card
+### 5. Flash to SD card
 ```bash
-# Preferred (fast, sparse-aware):
+# Fast (sparse-aware, recommended):
 bmaptool copy teres-i-alpine.img.gz /dev/sdX
 
 # Alternative:
 zcat teres-i-alpine.img.gz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-### 7. First boot — install to internal eMMC
+### 6. First boot and install to eMMC
 
-Insert the SD card into the Teres-I and power on. After it boots, log in as root
-and run:
+Insert the SD card, power on the Teres-I and wait for login. Then as root:
 ```bash
 install-to-nand.sh
 ```
-This partitions the internal eMMC (`/dev/mmcblk2`), writes U-Boot at the 8 KiB
-offset, copies boot files to a FAT32 partition, and copies the rootfs to an ext4
-partition. Remove the SD card and reboot; the board will boot from eMMC.
+This partitions the internal eMMC (`/dev/mmcblk2`), writes U-Boot raw at offset 8 KiB, copies boot files to a FAT32 partition, and copies the rootfs to ext4. Remove the SD card and reboot to run from eMMC.
+
+---
+
+## Default credentials
+
+| Account | Username | Password |
+|---|---|---|
+| Root | `root` | `root` |
+| Default user | `user` | `user` |
+
+The `user` account is created on first boot with sudo access via the `wheel` group.
+
+**Change both passwords immediately after first boot.**
+
+Serial console is available on `ttyS0` at 115200 baud via the 3.5mm audio jack.
+
+---
 
 ## WiFi
 
-WiFi is managed by **wpa_supplicant** + **dhcpcd**. No D-Bus required.
+WiFi is managed by `wpa_supplicant` + `dhcpcd`. No D-Bus required.
 
-To connect to a network on the device:
+### Connect to a network
 ```bash
-# Add network to wpa_supplicant config
+# Add a network and apply immediately
 wpa_passphrase "MyNetwork" "mypassword" >> /etc/wpa_supplicant/wpa_supplicant.conf
-
-# Apply without rebooting
 wpa_cli -i wlan0 reconfigure
 ```
 
@@ -103,109 +155,163 @@ wpa_cli -i wlan0
 > save_config
 ```
 
-dhcpcd picks up the IP automatically once wpa_supplicant associates.
+`dhcpcd` picks up the IP automatically once `wpa_supplicant` associates. DNS is configured via `openresolv` from the DHCP lease, with `1.1.1.1` / `8.8.8.8` as fallback.
 
-To pre-configure WiFi before the first boot, set these when building:
+---
+
+## Desktop
+
+DWM starts automatically on `tty1` login. Audio is initialized by `.xinitrc` when X starts (deferred from boot to avoid disrupting the debug serial UART).
+
+| Keybind | Action |
+|---|---|
+| `Alt+Shift+Enter` | Open terminal (st) |
+| `Alt+P` | dmenu application launcher |
+| `Alt+Shift+Q` | Quit DWM |
+| `Alt+1..9` | Switch tag/workspace |
+
+### Audio
 ```bash
-sudo WIFI_SSID="MyNetwork" WIFI_PASSWORD="mypassword" scripts/build-rootfs.sh
+# Initialize audio (also called automatically by startx)
+teres-audio-setup
+
+# Check ALSA card and controls
+aplay -l
+amixer -c 0 controls
 ```
 
-## Default credentials
+### Brightness
+```bash
+# Increase / decrease backlight
+brightnessctl set +10%
+brightnessctl set 10%-
+```
 
-| | |
-|---|---|
-| Root user | `root` / `root` |
-| Default user | `user` / `user` (created on first boot, has sudo) |
-| Serial console | `ttyS0 @ 115200` |
+### Battery
+```bash
+teres-battery
+# Battery: 87% (Discharging)
+# Voltage: 3.92V  Current: 450mA
+# AC: disconnected
+```
 
-**Change passwords on first boot.**
+---
 
-## What's included
+## System services (OpenRC)
 
-### Desktop environment
-- **DWM** (dynamic window manager) — auto-starts on tty1 login
-- **dmenu** — application launcher (Alt+P)
-- **st** / terminal — suckless terminal
-- **Firefox ESR** — stable browser (launch via dmenu or `firefox-esr &`)
-- **Xorg** with modesetting driver + Lima (Mali-400 GPU)
+| Service | Runlevel | Purpose |
+|---|---|---|
+| `check-edp` | default | Reboots if eDP display not detected on cold boot (A64 eDP cold-start workaround) |
+| `resize-rootfs` | default | Expands root partition to fill the storage device on first boot |
+| `setup-user` | default | Creates `user` account with sudo on first boot, then removes itself |
+| `rfkill-unblock` | default | Unblocks WiFi/Bluetooth rfkill before `wpa_supplicant` starts |
+| `wpa_supplicant` | boot | WiFi authentication daemon |
+| `dhcpcd` | default | DHCP client — assigns IP and configures DNS via openresolv |
+| `sshd` | default | SSH server (root login enabled; change password before exposing to network) |
+| `chronyd` | default | NTP time synchronization |
 
-### Hardware support
-- **Display**: ANX6345 eDP bridge, innolux 11.6" panel, eDP cold-boot workaround service
-- **Audio**: ALSA with Allwinner A64 codec (headphone + line out), auto-configured on boot
-- **Battery**: AXP803 PMIC monitoring via `teres-battery` command
-- **Brightness**: `brightnessctl` command for backlight control
-- **WiFi**: AP6212 (BCM43438) or RTL8723BS via wpa_supplicant + dhcpcd
-- **Bluetooth**: BCM or RTL (SDIO/UART)
+---
 
-### System services (OpenRC)
-- `check-edp` — reboots if eDP display not detected (cold boot workaround)
-- `resize-rootfs` — expands root partition on first boot
-- `setup-user` — creates `user` account with sudo on first boot
-- `wpa_supplicant` — WiFi authentication
-- `dhcpcd` — DHCP client (auto-assigns IP after WiFi connects)
-- `sshd` — SSH server
-- `chronyd` — NTP time sync
+## Storage layout
 
-## SD card partition layout
+### SD card / eMMC partitions
 
 | Region | Content |
 |---|---|
-| Raw offset 8 KiB | U-Boot SPL + TF-A BL31 + U-Boot proper |
-| Partition 1 (FAT32, 80 MiB) | `/boot` — Image, DTB, boot.scr, u-boot-sunxi-with-spl.bin |
-| Partition 2 (ext4, rest) | `/` — Alpine rootfs |
+| Raw offset 8 KiB | U-Boot SPL + TF-A BL31 + U-Boot proper (raw, no partition) |
+| Partition 1 — FAT32, 40–120 MiB | `/boot` — `Image`, DTB, `boot.scr`, `u-boot-sunxi-with-spl.bin` |
+| Partition 2 — ext4, rest | `/` — Alpine rootfs (auto-expands to fill device on first boot) |
 
-## eMMC layout (after `install-to-nand.sh`)
+### U-Boot vs Linux MMC numbering
 
-| Region | Content |
+On this board the MMC controllers are numbered differently by U-Boot and Linux:
+
+| Controller | U-Boot | Linux |
+|---|---|---|
+| microSD slot | `mmc 0` | `/dev/mmcblk0` |
+| SDIO WiFi | `mmc 2` | (no block device) |
+| Internal eMMC | `mmc 1` | `/dev/mmcblk2` |
+
+The SD boot script loads from `mmc 0:1`, the eMMC boot script from `mmc 1:1`.
+
+---
+
+## Kernel configuration
+
+The kernel is built from `arm64 defconfig` merged with `configs/kernel/teres-i.config`. Key additions:
+
+| Area | Options |
 |---|---|
-| Raw offset 8 KiB | U-Boot SPL + TF-A BL31 + U-Boot proper |
-| Partition 1 (FAT32, 80 MiB) | `/boot` — Image, DTB, boot.scr |
-| Partition 2 (ext4, rest) | `/` — Alpine rootfs |
+| Firmware loading | `FW_LOADER_COMPRESS_ZSTD` — loads Alpine's `.zst` firmware natively |
+| Display | `DRM_SUN4I`, `DRM_SUN6I_DSI`, `DRM_SUN8I_MIXER`, `DRM_ANALOGIX_ANX6345`, `DRM_PANEL_EDP` all built-in |
+| GPU | `DRM_LIMA` (Mali-400 MP2) as module |
+| WiFi | `BRCMFMAC` + `RTL8723BS` as modules |
+| Audio | `SND_SUN8I_CODEC`, `SND_SUN8I_CODEC_ANALOG`, `SND_SUN4I_I2S` as modules |
+| Battery | `POWER_SUPPLY`, `BATTERY_AXP20X`, `CHARGER_AXP20X` |
+| Power | `MFD_AXP20X` built-in, `AXP20X_POWER` built-in |
 
-Linux exposes the internal storage as `/dev/mmcblk2`, but U-Boot enumerates the
-same controller as `mmc 1` on this board. The eMMC `boot.scr` therefore loads
-the kernel from `mmc 1:1` and boots with
-`root=/dev/mmcblk2p2 rootfstype=ext4`.
+---
 
-## Build configuration
+## Known issues and workarounds
 
-| Item | Value |
-|---|---|
-| ARM Trusted Firmware | v2.10.0, `sun50i_a64` platform |
-| U-Boot | 2024.01, `teres_i_defconfig` |
-| U-Boot flash offset | 8 KiB (same as all sunxi boards) |
-| Kernel | 6.12.18, arm64 `defconfig` + `configs/kernel/teres-i.config` |
-| Kernel image | `Image` (uncompressed AArch64) |
-| Kernel boot command | `booti` |
-| DTB | `sun50i-a64-teres-i.dtb` |
-| Cross-compiler | `aarch64-linux-gnu-` (override via `CROSS_COMPILE=`) |
-| Parallel jobs | `$(nproc)` (override via `JOBS=N`) |
-| Alpine version | 3.21, arm64 (minirootfs bootstrap) |
-| Init system | OpenRC |
-| Window manager | DWM (suckless) |
-| WiFi | AP6212 (BCM43438, `brcmfmac`) or RTL8723BS (`rtl8723bs`) |
-| Hostname pre-config | Optional — `BOARD_HOSTNAME=mylaptop` |
-| WiFi pre-config | Optional — `WIFI_SSID=... WIFI_PASSWORD=...` |
+### eDP display cold boot
+The ANX6345 eDP bridge sometimes fails to initialize on a cold power-on. The `check-edp` OpenRC service detects this at boot by reading `/sys/class/drm/card0-Unknown-1/status` and reboots automatically if the display is not connected. A warm reboot always succeeds.
+
+### Serial UART via audio jack
+The debug serial port is accessible via the 3.5mm headphone jack using a USB-to-serial adapter wired to the UART rings. The Allwinner A64 audio codec analog driver (`snd_sun8i_codec_analog`) reconfigures the analog output path when it loads, disrupting the UART signal. Audio modules are therefore **not loaded at boot** — they are loaded on demand by `teres-audio-setup` which is called automatically by `.xinitrc` when X starts.
+
+### WiFi firmware compression
+Alpine packages firmware as `.zst` compressed files. The kernel needs `CONFIG_FW_LOADER_COMPRESS_ZSTD=y` to load them natively (enabled in `teres-i.config`). The rootfs build script also decompresses all firmware to plain files as a fallback for kernels built without that option.
+
+---
 
 ## Patches
 
 Place `.patch` files in:
-- `patches/uboot/` — applied to U-Boot before building
-- `patches/kernel/` — applied to the kernel before building
+- `patches/uboot/` — applied to U-Boot source before building
+- `patches/kernel/` — applied to kernel source before building
 
-Patches are applied in filename order with `patch -p1`.
+Patches are applied in filename order with `patch -p1`. No patches are currently required for U-Boot 2024.01 or kernel 6.12.18.
+
+---
 
 ## Cross-compiler override
 
 ```bash
-# Use a custom toolchain
 CROSS_COMPILE=aarch64-unknown-linux-gnu- scripts/build-uboot.sh
+CROSS_COMPILE=aarch64-unknown-linux-gnu- scripts/build-kernel.sh
 ```
 
-## Notes on the Allwinner A64 boot process
+Parallel jobs default to `$(nproc)`. Override with `JOBS=N`.
 
-Unlike 32-bit sunxi SoCs (A20, A80, etc.), the A64 requires ARM Trusted Firmware
-(TF-A) BL31 as the secure-world monitor.  `build-uboot.sh` compiles TF-A
-automatically and passes `BL31=` to the U-Boot build.  The resulting
-`u-boot-sunxi-with-spl.bin` embeds SPL, BL31, and U-Boot proper in a single
-binary that is written to offset 8 KiB — identical to all other sunxi boards.
+---
+
+## Repository structure
+
+```
+scripts/
+  install-deps.sh       — install build dependencies on the host
+  build-uboot.sh        — build TF-A + U-Boot
+  build-kernel.sh       — cross-compile the kernel
+  build-rootfs.sh       — bootstrap Alpine rootfs, install packages + services
+  assemble-sd-image.sh  — assemble bootable .img from build artifacts
+  install-to-nand.sh    — install SD image to internal eMMC (runs on device)
+
+configs/
+  kernel/teres-i.config — kernel config fragment for Teres-I hardware
+
+services/
+  check-edp.openrc      — OpenRC eDP cold-boot workaround service
+  check-edp.sh          — eDP detection helper
+  resize-rootfs.openrc  — first-boot root partition resize service
+  setup-user.openrc     — first-boot user creation service
+  teres-audio-setup.sh  — ALSA mixer init (called by .xinitrc)
+  teres-battery.sh      — battery status via AXP803 sysfs
+
+boot/
+  boot.cmd              — U-Boot boot script source (SD card)
+
+patches/
+  uboot/                — U-Boot patches (currently empty)
+  kernel/               — kernel patches (currently empty)
+```
