@@ -113,6 +113,7 @@ echo "==> Configuring Alpine repositories..."
 cat > "${SYSROOT}/etc/apk/repositories" <<EOF
 ${ALPINE_MIRROR}/v${ALPINE_VERSION}/main
 ${ALPINE_MIRROR}/v${ALPINE_VERSION}/community
+@testing ${ALPINE_MIRROR}/edge/testing
 EOF
 
 # ── Configure the system ────────────────────────────────────────────────────
@@ -148,22 +149,24 @@ chroot "${SYSROOT}" apk add --no-cache \
     wpa_supplicant dhcpcd openresolv iw \
     linux-firmware-brcm linux-firmware-rtlwifi \
     openssh chrony \
-    xorg-server xf86-video-modesetting xinit xrandr xset setxkbmap \
-    mesa-dri-gallium mesa-gl xf86-input-libinput \
-    dwm dmenu \
-    build-base libx11-dev libxft-dev libxinerama-dev \
+    mesa-dri-gallium mesa-gbm mesa-egl \
+    libinput \
+    seatd seatd-openrc \
+    foot wmenu wl-clipboard xkeyboard-config \
     font-dejavu \
     alsa-utils alsa-lib \
-    vim less htop \
+    neovim less htop \
     tzdata \
     cloud-utils-growpart
 
+# dwl is in the Alpine testing repository — install separately with @testing tag
+chroot "${SYSROOT}" apk add --no-cache dwl@testing || true
+
 # Optional packages — install separately so failures don't abort the build
-chroot "${SYSROOT}" apk add --no-cache st    || true
 # `light` is not in Alpine 3.21 — use brightnessctl instead (same sysfs interface)
 chroot "${SYSROOT}" apk add --no-cache brightnessctl || true
 chroot "${SYSROOT}" apk add --no-cache font-noto || true
-# Firefox ESR — stable branch, security-only updates between yearly releases
+# Firefox ESR — stable branch, forced to run under Wayland via environment variable
 chroot "${SYSROOT}" apk add --no-cache firefox-esr || true
 
 # ── Decompress .zst firmware files ──────────────────────────────────────────
@@ -267,6 +270,7 @@ chroot "${SYSROOT}" rc-update add chronyd default || true
 chroot "${SYSROOT}" rc-update add wpa_supplicant boot || true
 chroot "${SYSROOT}" rc-update add dhcpcd default || true
 chroot "${SYSROOT}" rc-update add local default || true
+chroot "${SYSROOT}" rc-update add seatd default || true
 
 chroot "${SYSROOT}" rc-update add mount-ro shutdown || true
 chroot "${SYSROOT}" rc-update add killprocs shutdown || true
@@ -325,7 +329,7 @@ RESOLV
 # ── Audio setup ──────────────────────────────────────────────────────────────
 # Audio modules are NOT loaded at boot — loading the A64 codec during early
 # boot disrupts the debug serial UART when using an audio-cable serial adapter.
-# Run teres-audio-setup manually after login, or it will be called by startx.
+# Run teres-audio-setup manually after login, or it will be called when dwl starts.
 
 echo "==> Installing audio setup script..."
 mkdir -p "${SYSROOT}/usr/local/sbin"
@@ -371,27 +375,50 @@ mkdir -p "${SYSROOT}/etc/sudoers.d"
 echo "%wheel ALL=(ALL:ALL) ALL" > "${SYSROOT}/etc/sudoers.d/wheel"
 chmod 440 "${SYSROOT}/etc/sudoers.d/wheel"
 
-# ── DWM / X11 auto-start configuration ──────────────────────────────────────
+# ── Wayland / dwl auto-start configuration ──────────────────────────────────
 
-echo "==> Setting up DWM as default window manager..."
-cat > "${SYSROOT}/etc/profile.d/startx-login.sh" <<'XLOGIN'
-# Auto-start X11 with DWM on tty1 login (for the default user)
-if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
-    exec startx
+echo "==> Setting up dwl as default Wayland compositor..."
+
+# Environment variables for Wayland: force Firefox to use Wayland, set Lima GPU,
+# GTK dark theme, and XDG_RUNTIME_DIR for Wayland sockets.
+cat > "${SYSROOT}/etc/profile.d/wayland-env.sh" <<'WAYENV'
+# Wayland environment for Teres-I
+export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=dwl
+
+# Force Firefox to use Wayland (no X11 fallback)
+export MOZ_ENABLE_WAYLAND=1
+export MOZ_WEBRENDER=1
+
+# Lima GPU (Mali-400 MP2) — use the software renderer as fallback
+export WLR_RENDERER=gles2
+export LIBSEAT_BACKEND=seatd
+
+# GTK dark mode
+export GTK_THEME=Adwaita:dark
+
+# Qt Wayland support (if any Qt apps are installed)
+export QT_QPA_PLATFORM=wayland
+WAYENV
+
+# Auto-start dwl on tty1 login (for the default user)
+cat > "${SYSROOT}/etc/profile.d/start-dwl.sh" <<'DWLLOGIN'
+# Auto-start dwl Wayland compositor on tty1 login
+if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    # Ensure XDG_RUNTIME_DIR exists
+    XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
+    export XDG_RUNTIME_DIR
+    mkdir -p "$XDG_RUNTIME_DIR"
+    chmod 0700 "$XDG_RUNTIME_DIR"
+
+    # Initialize audio (deferred from boot to avoid serial UART disruption)
+    /usr/local/sbin/teres-audio-setup.sh &
+
+    # Launch dwl with foot as the default terminal
+    exec dwl -s "foot"
 fi
-XLOGIN
-
-# Default .xinitrc for all users
-cat > "${SYSROOT}/etc/skel/.xinitrc" <<'XINITRC'
-#!/bin/sh
-# Initialize audio (deferred from boot to avoid serial UART disruption)
-/usr/local/sbin/teres-audio-setup.sh &
-# Set keyboard repeat rate
-xset r rate 200 30 &
-# Start DWM
-exec dwm
-XINITRC
-chmod 0644 "${SYSROOT}/etc/skel/.xinitrc"
+DWLLOGIN
 
 # ── WiFi pre-configuration ──────────────────────────────────────────────────
 # Appended to /etc/wpa_supplicant/wpa_supplicant.conf as a network block.
@@ -419,5 +446,9 @@ echo "    BOARD_HOSTNAME: ${BOARD_HOSTNAME}"
 echo "    WIFI_SSID: ${WIFI_SSID:-<not set>}"
 echo "    Root credentials: root / root"
 echo "    User credentials: user / user (created on first boot)"
-echo "    Window manager: DWM (auto-starts on tty1)"
+echo "    Compositor: dwl (Wayland, auto-starts on tty1)"
+echo "    Terminal: foot"
+echo "    Launcher: wmenu"
+echo "    Browser: Firefox ESR (Wayland-native)"
+echo "    Editor: neovim"
 echo "    Next step: sudo scripts/assemble-sd-image.sh"

@@ -1,8 +1,8 @@
 # teres-i-alpine-script
 
-Build scripts for [Olimex Teres-I](https://github.com/OLIMEX/DIY-LAPTOP) — a DIY AArch64 laptop based on the Allwinner A64 SoC — producing a minimal Alpine Linux image with DWM as the window manager.
+Build scripts for [Olimex Teres-I](https://github.com/OLIMEX/DIY-LAPTOP) — a DIY AArch64 laptop based on the Allwinner A64 SoC — producing a minimal Alpine Linux image with dwl (Wayland compositor) as the window manager.
 
-![Teres-I running Alpine Linux with DWM](screenshot.png)
+![Teres-I running Alpine Linux with dwl](screenshot.png)
 
 Builds everything from source: ARM Trusted Firmware, U-Boot, Linux kernel, and an Alpine Linux arm64 rootfs. No Yocto, no binary blobs beyond firmware files.
 
@@ -35,8 +35,11 @@ Builds everything from source: ARM Trusted Firmware, U-Boot, Linux kernel, and a
 | Kernel | 6.12.18 LTS, `arm64 defconfig` + `configs/kernel/teres-i.config` |
 | Alpine Linux | 3.21, arm64 minirootfs bootstrap |
 | Init system | OpenRC |
-| Window manager | DWM (suckless) |
-| Browser | Firefox ESR |
+| Window manager | dwl (wlroots-based Wayland compositor) |
+| Terminal | foot |
+| Launcher | wmenu |
+| Browser | Firefox ESR (Wayland-native) |
+| Editor | neovim |
 
 ---
 
@@ -163,18 +166,22 @@ wpa_cli -i wlan0
 
 ## Desktop
 
-DWM starts automatically on `tty1` login. Audio is initialized by `.xinitrc` when X starts (deferred from boot to avoid disrupting the debug serial UART).
+dwl (a wlroots-based Wayland compositor) starts automatically on `tty1` login. Audio is initialized by the startup script when dwl launches (deferred from boot to avoid disrupting the debug serial UART). GTK applications use the Adwaita dark theme. Firefox is configured to run natively under Wayland.
 
 | Keybind | Action |
 |---|---|
-| `Alt+Shift+Enter` | Open terminal (st) |
-| `Alt+P` | dmenu application launcher |
-| `Alt+Shift+Q` | Quit DWM |
+| `Alt+Shift+Return` | Open terminal (foot) |
+| `Alt+P` | wmenu application launcher |
+| `Alt+Shift+Q` | Quit dwl |
 | `Alt+1..9` | Switch tag/workspace |
+
+### Seat management
+
+Seat management is handled by `seatd`. The `seatd` service is enabled at boot and provides unprivileged access to input devices and DRM for the Wayland compositor. Users in the `seat` group can start a compositor without root.
 
 ### Audio
 ```bash
-# Initialize audio (also called automatically by startx)
+# Initialize audio (also called automatically when dwl starts)
 teres-audio-setup
 
 # Check ALSA card and controls
@@ -207,6 +214,7 @@ teres-battery
 | `resize-rootfs` | default | Expands root partition to fill the storage device on first boot |
 | `setup-user` | default | Creates `user` account with sudo on first boot, then removes itself |
 | `rfkill-unblock` | default | Unblocks WiFi/Bluetooth rfkill before `wpa_supplicant` starts |
+| `seatd` | default | Seat management daemon — provides unprivileged access to DRM/input for Wayland |
 | `wpa_supplicant` | boot | WiFi authentication daemon |
 | `dhcpcd` | default | DHCP client — assigns IP and configures DNS via openresolv |
 | `sshd` | default | SSH server (root login enabled; change password before exposing to network) |
@@ -260,7 +268,7 @@ The kernel is built from `arm64 defconfig` merged with `configs/kernel/teres-i.c
 The ANX6345 eDP bridge sometimes fails to initialize on a cold power-on. The `check-edp` OpenRC service detects this at boot by reading `/sys/class/drm/card0-Unknown-1/status` and reboots automatically if the display is not connected. A warm reboot always succeeds.
 
 ### Serial UART via audio jack
-The debug serial port is accessible via the 3.5mm headphone jack using a USB-to-serial adapter wired to the UART rings. The Allwinner A64 audio codec analog driver (`snd_sun8i_codec_analog`) reconfigures the analog output path when it loads, disrupting the UART signal. Audio modules are therefore **not loaded at boot** — they are loaded on demand by `teres-audio-setup` which is called automatically by `.xinitrc` when X starts.
+The debug serial port is accessible via the 3.5mm headphone jack using a USB-to-serial adapter wired to the UART rings. The Allwinner A64 audio codec analog driver (`snd_sun8i_codec_analog`) reconfigures the analog output path when it loads, disrupting the UART signal. Audio modules are therefore **not loaded at boot** — they are loaded on demand by `teres-audio-setup` which is called automatically when dwl starts.
 
 ### WiFi firmware compression
 Alpine packages firmware as `.zst` compressed files. The kernel needs `CONFIG_FW_LOADER_COMPRESS_ZSTD=y` to load them natively (enabled in `teres-i.config`). The rootfs build script also decompresses all firmware to plain files as a fallback for kernels built without that option.
@@ -307,7 +315,7 @@ services/
   check-edp.sh          — eDP detection helper
   resize-rootfs.openrc  — first-boot root partition resize service
   setup-user.openrc     — first-boot user creation service
-  teres-audio-setup.sh  — ALSA mixer init (called by .xinitrc)
+  teres-audio-setup.sh  — ALSA mixer init (called when dwl starts)
   teres-battery.sh      — battery status via AXP803 sysfs
 
 boot/
