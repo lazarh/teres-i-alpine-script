@@ -113,7 +113,7 @@ echo "==> Configuring Alpine repositories..."
 cat > "${SYSROOT}/etc/apk/repositories" <<EOF
 ${ALPINE_MIRROR}/v${ALPINE_VERSION}/main
 ${ALPINE_MIRROR}/v${ALPINE_VERSION}/community
-@testing ${ALPINE_MIRROR}/edge/testing
+@testing ${ALPINE_MIRROR}/edge/testing   # dwl is only available in Alpine testing
 EOF
 
 # ── Configure the system ────────────────────────────────────────────────────
@@ -160,7 +160,10 @@ chroot "${SYSROOT}" apk add --no-cache \
     cloud-utils-growpart
 
 # dwl is in the Alpine testing repository — install separately with @testing tag
-chroot "${SYSROOT}" apk add --no-cache dwl@testing || true
+# dwl is the core Wayland compositor — fail the build if it cannot be installed
+if ! chroot "${SYSROOT}" apk add --no-cache dwl@testing; then
+    die "Failed to install dwl from Alpine testing repository"
+fi
 
 # Optional packages — install separately so failures don't abort the build
 # `light` is not in Alpine 3.21 — use brightnessctl instead (same sysfs interface)
@@ -381,7 +384,8 @@ echo "==> Setting up dwl as default Wayland compositor..."
 
 # Environment variables for Wayland: force Firefox to use Wayland, set Lima GPU,
 # GTK dark theme, and XDG_RUNTIME_DIR for Wayland sockets.
-cat > "${SYSROOT}/etc/profile.d/wayland-env.sh" <<'WAYENV'
+# Named with 00- prefix so it is sourced before start-dwl.sh (alphabetical order).
+cat > "${SYSROOT}/etc/profile.d/00-wayland-env.sh" <<'WAYENV'
 # Wayland environment for Teres-I
 export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
 export XDG_SESSION_TYPE=wayland
@@ -406,9 +410,7 @@ WAYENV
 cat > "${SYSROOT}/etc/profile.d/start-dwl.sh" <<'DWLLOGIN'
 # Auto-start dwl Wayland compositor on tty1 login
 if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
-    # Ensure XDG_RUNTIME_DIR exists
-    XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
-    export XDG_RUNTIME_DIR
+    # Ensure XDG_RUNTIME_DIR exists (set by 00-wayland-env.sh, sourced before this)
     mkdir -p "$XDG_RUNTIME_DIR"
     chmod 0700 "$XDG_RUNTIME_DIR"
 
