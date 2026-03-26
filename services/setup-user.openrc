@@ -5,7 +5,7 @@ description="Create default user account if it does not exist"
 USER_NAME="user"
 
 depend() {
-    need localmount
+    need localmount setup-groups
     keyword -prefix
 }
 
@@ -16,8 +16,25 @@ start() {
         einfo "User '${USER_NAME}' already exists"
     else
         einfo "Creating user '${USER_NAME}' with sudo access..."
-        adduser -D -G wheel -s /bin/sh "${USER_NAME}"
-        echo "${USER_NAME}:${USER_NAME}" | chpasswd
+        
+        # Create user first (this also creates the user group)
+        if ! adduser -D -h "/home/${USER_NAME}" -s /bin/sh "${USER_NAME}"; then
+            eerror "Failed to create user ${USER_NAME}"
+            eend 1
+        fi
+        
+        # Add user to supplementary groups
+        for group in wheel seat video render audio; do
+            addgroup "${USER_NAME}" "$group" 2>/dev/null || true
+        done
+        
+        # Set home directory ownership
+        mkdir -p "/home/${USER_NAME}"
+        chown -R "${USER_NAME}:${USER_NAME}" "/home/${USER_NAME}" 2>/dev/null || true
+        
+        # Set password
+        echo "${USER_NAME}:${USER_NAME}" | chpasswd 2>/dev/null || true
+        
         einfo "User '${USER_NAME}' created (password: ${USER_NAME})"
         einfo "Change your password after first login!"
     fi

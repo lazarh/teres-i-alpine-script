@@ -113,6 +113,8 @@ echo "==> Configuring Alpine repositories..."
 cat > "${SYSROOT}/etc/apk/repositories" <<EOF
 ${ALPINE_MIRROR}/v${ALPINE_VERSION}/main
 ${ALPINE_MIRROR}/v${ALPINE_VERSION}/community
+# dwl is only available in Alpine testing
+@testing ${ALPINE_MIRROR}/edge/testing
 EOF
 
 # ── Configure the system ────────────────────────────────────────────────────
@@ -147,23 +149,26 @@ chroot "${SYSROOT}" apk add --no-cache \
     kmod iproute2 iputils iptables nftables \
     wpa_supplicant dhcpcd openresolv iw \
     linux-firmware-brcm linux-firmware-rtlwifi \
-    openssh chrony \
-    xorg-server xf86-video-modesetting xinit xrandr xset setxkbmap \
-    mesa-dri-gallium mesa-gl xf86-input-libinput \
-    dwm dmenu \
-    build-base libx11-dev libxft-dev libxinerama-dev \
-    font-dejavu \
+    openssh chrony dbus \
+    mesa-dri-gallium mesa-gbm mesa-egl \
+    libinput \
+    seatd seatd-openrc \
+    foot wmenu wl-clipboard xkeyboard-config waybar \
+    font-dejavu font-noto \
     alsa-utils alsa-lib \
-    vim less htop \
+    neovim less htop \
+    brightnessctl \
     tzdata \
-    cloud-utils-growpart
+    cloud-utils-growpart \
+    wlrctl 
 
-# Optional packages — install separately so failures don't abort the build
-chroot "${SYSROOT}" apk add --no-cache st    || true
-# `light` is not in Alpine 3.21 — use brightnessctl instead (same sysfs interface)
-chroot "${SYSROOT}" apk add --no-cache brightnessctl || true
-chroot "${SYSROOT}" apk add --no-cache font-noto || true
-# Firefox ESR — stable branch, security-only updates between yearly releases
+# dwl is in the Alpine testing repository — install separately with @testing tag
+# dwl is the core Wayland compositor — fail the build if it cannot be installed
+if ! chroot "${SYSROOT}" apk add --no-cache dwl@testing; then
+    die "Failed to install dwl from Alpine testing repository"
+fi
+
+# Firefox ESR — stable branch, forced to run under Wayland via environment variable
 chroot "${SYSROOT}" apk add --no-cache firefox-esr || true
 
 # ── Decompress .zst firmware files ──────────────────────────────────────────
@@ -244,7 +249,24 @@ install -m 0755 "${REPO_ROOT}/services/resize-rootfs.openrc" \
     "${SYSROOT}/etc/init.d/resize-rootfs"
 chroot "${SYSROOT}" rc-update add resize-rootfs default || true
 
-# First-boot user creation
+# First-boot group and user creation
+cat > "${SYSROOT}/etc/init.d/setup-groups" <<'GROUPSETUP'
+#!/sbin/openrc-run
+description="Create required groups on first boot"
+depend() { need localmount; keyword -prefix; }
+start() {
+    ebegin "Creating system groups"
+    for group in render seat video audio; do
+        if ! getent group "$group" >/dev/null 2>&1; then
+            addgroup -S "$group" 2>/dev/null || true
+        fi
+    done
+    eend 0
+}
+GROUPSETUP
+chmod 0755 "${SYSROOT}/etc/init.d/setup-groups"
+chroot "${SYSROOT}" rc-update add setup-groups default || true
+
 install -m 0755 "${REPO_ROOT}/services/setup-user.openrc" \
     "${SYSROOT}/etc/init.d/setup-user"
 chroot "${SYSROOT}" rc-update add setup-user default || true
@@ -267,6 +289,7 @@ chroot "${SYSROOT}" rc-update add chronyd default || true
 chroot "${SYSROOT}" rc-update add wpa_supplicant boot || true
 chroot "${SYSROOT}" rc-update add dhcpcd default || true
 chroot "${SYSROOT}" rc-update add local default || true
+chroot "${SYSROOT}" rc-update add seatd default || true
 
 chroot "${SYSROOT}" rc-update add mount-ro shutdown || true
 chroot "${SYSROOT}" rc-update add killprocs shutdown || true
@@ -325,7 +348,7 @@ RESOLV
 # ── Audio setup ──────────────────────────────────────────────────────────────
 # Audio modules are NOT loaded at boot — loading the A64 codec during early
 # boot disrupts the debug serial UART when using an audio-cable serial adapter.
-# Run teres-audio-setup manually after login, or it will be called by startx.
+# Run teres-audio-setup manually after login, or it will be called when dwl starts.
 
 echo "==> Installing audio setup script..."
 mkdir -p "${SYSROOT}/usr/local/sbin"
@@ -371,27 +394,187 @@ mkdir -p "${SYSROOT}/etc/sudoers.d"
 echo "%wheel ALL=(ALL:ALL) ALL" > "${SYSROOT}/etc/sudoers.d/wheel"
 chmod 440 "${SYSROOT}/etc/sudoers.d/wheel"
 
-# ── DWM / X11 auto-start configuration ──────────────────────────────────────
+# ── Wayland / dwl auto-start configuration ──────────────────────────────────
 
-echo "==> Setting up DWM as default window manager..."
-cat > "${SYSROOT}/etc/profile.d/startx-login.sh" <<'XLOGIN'
-# Auto-start X11 with DWM on tty1 login (for the default user)
-if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
-    exec startx
+echo "==> Setting up dwl as default Wayland compositor..."
+
+# Environment variables for Wayland: force Firefox to use Wayland, set Lima GPU,
+# GTK dark theme, and XDG_RUNTIME_DIR for Wayland sockets.
+# Named with 00- prefix so it is sourced before start-dwl.sh (alphabetical order).
+cat > "${SYSROOT}/etc/profile.d/00-wayland-env.sh" <<'WAYENV'
+# Wayland environment for Teres-I
+export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=dwl
+
+# Start dbus user session if not already running (with fallback if dbus-launch unavailable)
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+    if command -v dbus-launch >/dev/null 2>&1; then
+        eval "$(dbus-launch --sh-syntax)"
+    fi
 fi
-XLOGIN
 
-# Default .xinitrc for all users
-cat > "${SYSROOT}/etc/skel/.xinitrc" <<'XINITRC'
+# Force Firefox to use Wayland (no X11 fallback)
+export MOZ_ENABLE_WAYLAND=1
+export MOZ_WEBRENDER=1
+
+# Lima GPU (Mali-400 MP2) — use the software renderer as fallback
+export WLR_RENDERER=gles2
+export LIBSEAT_BACKEND=seatd
+
+# GTK dark mode
+export GTK_THEME=Adwaita:dark
+
+# Qt Wayland support (if any Qt apps are installed)
+export QT_QPA_PLATFORM=wayland
+
+export WLR_NO_HARDWARE_CURSORS=1 
+WAYENV
+
+# Auto-start dwl on tty1 login (for the default user)
+cat > "${SYSROOT}/etc/profile.d/start-dwl.sh" <<'DWLLOGIN'
+# Auto-start dwl Wayland compositor on tty1 login
+if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    # Ensure XDG_RUNTIME_DIR exists (set by 00-wayland-env.sh, sourced before this)
+    mkdir -p "$XDG_RUNTIME_DIR"
+    chmod 0700 "$XDG_RUNTIME_DIR"
+
+    # Initialize audio (deferred from boot to avoid serial UART disruption)
+    /usr/local/sbin/teres-audio-setup.sh &
+
+    # Launch dwl with dbus-run-session to provide dbus session bus
+    exec dbus-run-session -- dwl -s "waybar"
+fi
+DWLLOGIN
+
+# ── Waybar configuration ────────────────────────────────────────────────────
+# Waybar is a Wayland status bar that works with dwl
+
+echo "==> Configuring waybar status bar..."
+mkdir -p "${SYSROOT}/etc/xdg/waybar"
+
+cat > "${SYSROOT}/etc/xdg/waybar/config.jsonc" <<'WAYBARCONFIG'
+{
+    "layer": "top",
+    "position": "top",
+    "height": 24,
+    "spacing": 4,
+    "modules-left": ["custom/tag1", "custom/tag2", "custom/tag3", "custom/tag4"],
+    "modules-center": [],
+    "modules-right": ["custom/uptime", "cpu", "memory", "battery", "clock"],
+
+    "custom/tag1": { "format": "1", "on-click": "wlrctl keyboard type 'M-1'" },
+    "custom/tag2": { "format": "2", "on-click": "wlrctl keyboard type 'M-2'" },
+    "custom/tag3": { "format": "3", "on-click": "wlrctl keyboard type 'M-3'" },
+    "custom/tag4": { "format": "4", "on-click": "wlrctl keyboard type 'M-4'" },
+
+    "cpu": {
+        "interval": 10,
+        "format": "L: {usage}%",
+        "max-length": 10
+    },
+
+    "memory": {
+        "interval": 30,
+        "format": "M: {used:0.1f}G",
+        "max-length": 10
+    },
+
+    "battery": {
+        "interval": 60,
+        "states": {
+            "warning": 30,
+            "critical": 15
+        },
+        "format": "B: {capacity}%",
+        "format-charging": "B: {capacity}%+",
+        "max-length": 10
+    },
+
+    "clock": {
+        "format": "{:%Y-%m-%d %H:%M}",
+        "tooltip": false
+    },
+
+    "custom/uptime": {
+        "exec": "uptime -p | sed 's/up //'",
+        "interval": 60,
+        "format": "U: {}"
+    }
+}
+WAYBARCONFIG
+
+cat > "${SYSROOT}/etc/xdg/waybar/style.css" <<'WAYBARSTYLE'
+* {
+    border: none;
+    border-radius: 0;
+    font-family: "DejaVu Sans Mono", "Monospace";
+    font-size: 10px;
+    min-height: 0;
+}
+
+window#waybar {
+    background: #000000;
+    color: #ffffff;
+    border-bottom: 1px solid #444444;
+}
+
+#taskbar button {
+    color: #ffffff;
+    padding: 0 5px;
+}
+
+#taskbar button.active {
+    background-color: #444444;
+    color: #ffffff;
+}
+
+#custom-uptime, #cpu, #memory, #battery, #clock {
+    padding: 0 8px;
+    background-color: transparent;
+}
+
+/* Colors for specific states */
+#battery.warning { color: #ffaa00; }
+#battery.critical { color: #ff5555; }
+WAYBARSTYLE
+
+# ── Foot terminal configuration ────────────────────────────────────────────
+# Configure foot terminal with DejaVu Sans Mono 
+
+echo "==> Configuring foot terminal..."
+mkdir -p "${SYSROOT}/root/.config/foot"
+
+cat > "${SYSROOT}/root/.config/foot/foot.ini" <<'FOOTCONFIG'
+[main]
+term=xterm-256color
+font=DejaVu Sans Mono:size=10
+dpi-aware=yes
+
+[cursor]
+style=beam
+
+[colors]
+foreground=ffffff
+background=000000
+FOOTCONFIG
+
+# ── wmenu wrapper script ───────────────────────────────────────────────────
+# Create wrapper script to launch wmenu with font configuration
+# Replace the original wmenu so dwl keybindings automatically use the configured version
+
+echo "==> Configuring wmenu launcher..."
+mkdir -p "${SYSROOT}/usr/local/bin"
+
+# Backup original wmenu and create wrapper
+chroot "${SYSROOT}" sh -c 'mv /usr/bin/wmenu /usr/bin/wmenu.real 2>/dev/null || true'
+
+cat > "${SYSROOT}/usr/local/bin/wmenu" <<'WMENUWRAPPER'
 #!/bin/sh
-# Initialize audio (deferred from boot to avoid serial UART disruption)
-/usr/local/sbin/teres-audio-setup.sh &
-# Set keyboard repeat rate
-xset r rate 200 30 &
-# Start DWM
-exec dwm
-XINITRC
-chmod 0644 "${SYSROOT}/etc/skel/.xinitrc"
+# wmenu wrapper with font configuration
+exec /usr/bin/wmenu.real -f "DejaVu Sans Mono-10" "$@"
+WMENUWRAPPER
+chmod 0755 "${SYSROOT}/usr/local/bin/wmenu"
 
 # ── WiFi pre-configuration ──────────────────────────────────────────────────
 # Appended to /etc/wpa_supplicant/wpa_supplicant.conf as a network block.
@@ -408,6 +591,9 @@ fi
 
 # ── Cleanup ─────────────────────────────────────────────────────────────────
 
+# Generate dbus machine-id (unique identifier for this system instance)
+chroot "${SYSROOT}" dbus-uuidgen --ensure=/etc/machine-id
+
 rm -f "${SYSROOT}/usr/bin/qemu-aarch64-static"
 rm -f "${SYSROOT}/etc/resolv.conf"
 chroot "${SYSROOT}" apk cache clean 2>/dev/null || true
@@ -419,5 +605,10 @@ echo "    BOARD_HOSTNAME: ${BOARD_HOSTNAME}"
 echo "    WIFI_SSID: ${WIFI_SSID:-<not set>}"
 echo "    Root credentials: root / root"
 echo "    User credentials: user / user (created on first boot)"
-echo "    Window manager: DWM (auto-starts on tty1)"
+echo "    Compositor: dwl (Wayland, auto-starts on tty1)"
+echo "    Status bar: waybar (taskbar, uptime, CPU, memory, battery, clock)"
+echo "    Terminal: foot"
+echo "    Launcher: wmenu"
+echo "    Browser: Firefox ESR (Wayland-native)"
+echo "    Editor: neovim"
 echo "    Next step: sudo scripts/assemble-sd-image.sh"
